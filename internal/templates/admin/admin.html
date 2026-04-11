@@ -36,7 +36,7 @@
 </div>
 
 {{range .Users}}
-<div class="card">
+<div class="card" data-user-id="{{.ID}}">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
         <div>
             <strong style="font-size: 1.1rem;">{{.Username}}</strong>
@@ -44,14 +44,14 @@
             {{if .IsAdmin}}<span class="badge badge-green">admin</span>{{end}}
             {{if not .IsActive}}<span class="badge badge-red">blocked</span>{{end}}
             {{if gt .OnlineCount 0}}
-                <span class="badge badge-green">online ({{.OnlineCount}})</span>
+                <span class="badge badge-green" data-stat="user-online">online ({{.OnlineCount}})</span>
             {{else}}
-                <span class="badge" style="background: #475569; color: #94a3b8;">offline</span>
+                <span class="badge" style="background: #475569; color: #94a3b8;" data-stat="user-online">offline</span>
             {{end}}
         </div>
         <div style="display: flex; gap: 1rem; align-items: center;">
             <span class="stat" title="Устройства (активные профили)">📱 {{.DeviceCount}} / {{len .Profiles}}</span>
-            <span class="stat">Σ {{formatBytes .TotalTraffic}}</span>
+            <span class="stat" data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</span>
         </div>
     </div>
 
@@ -65,7 +65,7 @@
             <th>Действия</th>
         </tr>
         {{range .Profiles}}
-        <tr>
+        <tr data-profile-id="{{.ID}}">
             <td>
                 <strong>{{.Name}}</strong>
                 <div style="font-size: 0.7rem; color: #64748b; font-family: monospace;">{{.UUID}}</div>
@@ -73,19 +73,19 @@
             <td>
                 {{if .IsActive}}
                     {{if .IsOnline}}
-                        <span class="badge badge-green">● online</span>
-                        {{if gt .DeviceCount 1}}
-                            <span class="badge" style="background: #1e3a5f; color: #60a5fa;" title="Подключённых устройств (уникальных IP)">📱 {{.DeviceCount}}</span>
-                        {{end}}
+                        <span class="badge badge-green" data-stat="profile-status">● online</span>
+                        <span class="badge" style="background: #1e3a5f; color: #60a5fa;{{if le .DeviceCount 1}} display:none;{{end}}" title="Подключённых устройств (уникальных IP)" data-stat="profile-devices">📱 {{.DeviceCount}}</span>
                     {{else}}
-                        <span class="badge" style="background: #1e3a5f; color: #60a5fa;">active</span>
+                        <span class="badge" style="background: #1e3a5f; color: #60a5fa;" data-stat="profile-status">active</span>
+                        <span class="badge" style="background: #1e3a5f; color: #60a5fa; display:none;" title="Подключённых устройств (уникальных IP)" data-stat="profile-devices"></span>
                     {{end}}
                 {{else}}
-                    <span class="badge badge-red">disabled</span>
+                    <span class="badge badge-red" data-stat="profile-status">disabled</span>
+                    <span class="badge" style="display:none;" data-stat="profile-devices"></span>
                 {{end}}
             </td>
             <td>
-                <span class="stat">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
+                <span class="stat" data-stat="profile-traffic">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
             </td>
             <td>
                 <form method="POST" action="/admin/profiles/{{.ID}}/limit" style="display: flex; gap: 0.3rem; align-items: center;">
@@ -126,6 +126,73 @@ let timer = null;
 let countdown = null;
 let remaining = 0;
 
+function refreshStats() {
+    fetch('/admin/stats')
+        .then(r => r.json())
+        .then(users => {
+            users.forEach(u => {
+                const card = document.querySelector(`[data-user-id="${u.user_id}"]`);
+                if (!card) return;
+
+                // Обновляем онлайн-бейдж пользователя
+                const userOnline = card.querySelector('[data-stat="user-online"]');
+                if (userOnline) {
+                    if (u.online_count > 0) {
+                        userOnline.className = 'badge badge-green';
+                        userOnline.style = '';
+                        userOnline.textContent = 'online (' + u.online_count + ')';
+                    } else {
+                        userOnline.className = 'badge';
+                        userOnline.style.background = '#475569';
+                        userOnline.style.color = '#94a3b8';
+                        userOnline.textContent = 'offline';
+                    }
+                }
+
+                // Обновляем общий трафик пользователя
+                const userTotal = card.querySelector('[data-stat="user-total"]');
+                if (userTotal) userTotal.textContent = 'Σ ' + u.total_traffic_fmt;
+
+                // Обновляем профили
+                (u.profiles || []).forEach(p => {
+                    const row = card.querySelector(`[data-profile-id="${p.id}"]`);
+                    if (!row) return;
+
+                    const status = row.querySelector('[data-stat="profile-status"]');
+                    const devices = row.querySelector('[data-stat="profile-devices"]');
+                    const traffic = row.querySelector('[data-stat="profile-traffic"]');
+
+                    if (status) {
+                        if (status.textContent.trim() === 'disabled') {
+                            // Не меняем disabled-профили через AJAX
+                        } else if (p.is_online) {
+                            status.className = 'badge badge-green';
+                            status.style = '';
+                            status.textContent = '● online';
+                        } else {
+                            status.className = 'badge';
+                            status.style.background = '#1e3a5f';
+                            status.style.color = '#60a5fa';
+                            status.textContent = 'active';
+                        }
+                    }
+
+                    if (devices) {
+                        if (p.is_online && p.device_count > 1) {
+                            devices.style.display = '';
+                            devices.textContent = '📱 ' + p.device_count;
+                        } else {
+                            devices.style.display = 'none';
+                        }
+                    }
+
+                    if (traffic) traffic.textContent = '↑' + p.traffic_up_fmt + ' ↓' + p.traffic_down_fmt;
+                });
+            });
+        })
+        .catch(() => {});
+}
+
 function setRefresh(sec) {
     clearInterval(timer);
     clearInterval(countdown);
@@ -138,7 +205,7 @@ function setRefresh(sec) {
     remaining = sec;
     updateCountdown();
     countdown = setInterval(updateCountdown, 1000);
-    timer = setInterval(() => location.reload(), sec * 1000);
+    timer = setInterval(refreshStats, sec * 1000);
 }
 
 function updateCountdown() {

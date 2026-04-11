@@ -113,6 +113,7 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authMW.RequireAdmin)
 			r.Get("/admin", adminHandler.Users)
+			r.Get("/admin/stats", adminHandler.StatsJSON)
 			r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
 			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
 			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)

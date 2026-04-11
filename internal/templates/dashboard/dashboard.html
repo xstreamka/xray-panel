@@ -34,12 +34,11 @@
             <strong>{{.Name}}</strong>
             {{if .IsActive}}
                 {{if .IsOnline}}
-                    <span class="badge badge-green">● online</span>
-                    {{if gt .DeviceCount 0}}
-                        <span class="badge" style="background: #1e3a5f; color: #60a5fa;" title="Подключённых устройств">📱 {{.DeviceCount}}</span>
-                    {{end}}
+                    <span class="badge badge-green" data-stat="status">● online</span>
+                    <span class="badge" style="background: #1e3a5f; color: #60a5fa;{{if eq .DeviceCount 0}} display:none;{{end}}" title="Подключённых устройств" data-stat="devices">📱 {{.DeviceCount}}</span>
                 {{else}}
-                    <span class="badge" style="background: #1e3a5f; color: #60a5fa;">active</span>
+                    <span class="badge" style="background: #1e3a5f; color: #60a5fa;" data-stat="status">active</span>
+                    <span class="badge" style="background: #1e3a5f; color: #60a5fa; display:none;" title="Подключённых устройств" data-stat="devices"></span>
                 {{end}}
             {{else if .IsExpired}}
                 <span class="badge badge-red">expired</span>
@@ -142,6 +141,29 @@ function refreshStats() {
                 if (bar) {
                     bar.style.width = s.usage_percent + '%';
                     if (s.progress_color) bar.style.background = s.progress_color;
+                }
+
+                // Обновляем онлайн-статус и количество устройств
+                const statusEl = card.querySelector('[data-stat="status"]');
+                const devicesEl = card.querySelector('[data-stat="devices"]');
+                if (statusEl) {
+                    if (s.is_online) {
+                        statusEl.className = 'badge badge-green';
+                        statusEl.textContent = '● online';
+                    } else {
+                        statusEl.className = 'badge';
+                        statusEl.style.background = '#1e3a5f';
+                        statusEl.style.color = '#60a5fa';
+                        statusEl.textContent = 'active';
+                    }
+                }
+                if (devicesEl) {
+                    if (s.is_online && s.device_count > 0) {
+                        devicesEl.style.display = '';
+                        devicesEl.textContent = '📱 ' + s.device_count;
+                    } else {
+                        devicesEl.style.display = 'none';
+                    }
                 }
             });
         })

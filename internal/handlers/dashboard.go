@@ -190,6 +190,8 @@ type profileStatsJSON struct {
 	UsagePercent    int    `json:"usage_percent"`
 	ProgressColor   string `json:"progress_color"`
 	LimitFmt        string `json:"limit_fmt,omitzero"`
+	IsOnline        bool   `json:"is_online"`
+	DeviceCount     int    `json:"device_count"`
 }
 
 func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +203,8 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	onlineUsers := make(map[string]bool)
+	onlineIPCounts := make(map[string]int)
 	if client := h.xrayHolder.Get(); client != nil {
 		if liveTraffic, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
 			for i, p := range profiles {
@@ -209,6 +213,12 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 					profiles[i].TrafficDown += stats[1]
 				}
 			}
+		}
+		if online, err := client.GetOnlineUsers(r.Context()); err == nil {
+			onlineUsers = online
+		}
+		if counts, err := client.GetOnlineIPCounts(r.Context()); err == nil {
+			onlineIPCounts = counts
 		}
 	}
 
@@ -223,6 +233,8 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			TrafficUpFmt:    formatBytesGo(p.TrafficUp),
 			TrafficDownFmt:  formatBytesGo(p.TrafficDown),
 			TrafficTotalFmt: formatBytesGo(total),
+			IsOnline:        onlineUsers[p.UUID],
+			DeviceCount:     onlineIPCounts[p.UUID],
 		}
 
 		if p.TrafficLimit > 0 {
