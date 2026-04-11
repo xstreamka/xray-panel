@@ -136,7 +136,13 @@ func (c *Client) GetOnlineUsers(ctx context.Context) (map[string]bool, error) {
 	}
 
 	online := make(map[string]bool, len(resp.GetUsers()))
-	for _, email := range resp.GetUsers() {
+	for _, raw := range resp.GetUsers() {
+		// API возвращает полный ключ "user>>>email>>>online" — извлекаем email
+		email := raw
+		parts := strings.SplitN(raw, ">>>", 3)
+		if len(parts) >= 2 {
+			email = parts[1]
+		}
 		online[email] = true
 	}
 	return online, nil
