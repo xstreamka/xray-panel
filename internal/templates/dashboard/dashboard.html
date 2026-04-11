@@ -110,5 +110,8 @@ function showQR(btn) {
     });
     modal.style.display = 'flex';
 }
+
+// Автообновление статистики каждые 30 секунд
+setTimeout(() => location.reload(), 30000);
 </script>
 {{end}}

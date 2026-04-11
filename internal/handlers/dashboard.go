@@ -47,6 +47,17 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Подтягиваем свежую статистику из Xray (без сброса) для актуальных данных
+	if client := h.xrayHolder.Get(); client != nil {
+		for i, p := range profiles {
+			up, down, err := client.GetUserTraffic(r.Context(), p.UUID, false)
+			if err == nil {
+				profiles[i].TrafficUp += up
+				profiles[i].TrafficDown += down
+			}
+		}
+	}
+
 	var views []profileView
 	for _, p := range profiles {
 		v := profileView{

@@ -41,13 +41,16 @@ func (s *StatsCollector) Run(ctx context.Context) {
 }
 
 func (s *StatsCollector) collect(ctx context.Context) {
-	traffic, err := s.client.QueryAllUserTraffic(ctx, true)
+	// 1. Получаем без сброса
+	traffic, err := s.client.QueryAllUserTraffic(ctx, false)
 	if err != nil {
 		log.Printf("Stats collect error: %v", err)
 		return
 	}
 
+	// 2. Записываем в БД
 	updated := 0
+	allOK := true
 	for email, stats := range traffic {
 		up, down := stats[0], stats[1]
 		if up == 0 && down == 0 {
@@ -56,8 +59,16 @@ func (s *StatsCollector) collect(ctx context.Context) {
 
 		if err := s.profiles.UpdateTraffic(ctx, email, up, down); err != nil {
 			log.Printf("Stats update error for %s: %v", email, err)
+			allOK = false
 		} else {
 			updated++
+		}
+	}
+
+	// 3. Сбрасываем счётчики Xray только если всё записалось в БД
+	if allOK {
+		if _, err := s.client.QueryAllUserTraffic(ctx, true); err != nil {
+			log.Printf("Stats reset error: %v", err)
 		}
 	}
 
