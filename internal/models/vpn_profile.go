@@ -185,3 +185,30 @@ func (s *VPNProfileStore) GetExceeded(ctx context.Context) ([]VPNProfile, error)
 	}
 	return profiles, nil
 }
+
+func (s *VPNProfileStore) GetByID(ctx context.Context, id int) (*VPNProfile, error) {
+	p := &VPNProfile{}
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, user_id, uuid, name, is_active, traffic_up, traffic_down, traffic_limit, expires_at, created_at, updated_at
+		 FROM vpn_profiles WHERE id = $1`, id,
+	).Scan(&p.ID, &p.UserID, &p.UUID, &p.Name, &p.IsActive, &p.TrafficUp, &p.TrafficDown, &p.TrafficLimit, &p.ExpiresAt, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("profile not found")
+	}
+	return p, nil
+}
+
+func (s *VPNProfileStore) SetLimit(ctx context.Context, id int, limitBytes int64) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE vpn_profiles SET traffic_limit = $1, updated_at = NOW() WHERE id = $2`,
+		limitBytes, id,
+	)
+	return err
+}
+
+func (s *VPNProfileStore) ResetTraffic(ctx context.Context, id int) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE vpn_profiles SET traffic_up = 0, traffic_down = 0, updated_at = NOW() WHERE id = $1`, id,
+	)
+	return err
+}

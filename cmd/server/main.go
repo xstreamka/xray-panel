@@ -61,7 +61,16 @@ func main() {
 	go connectXray(ctx, cfg, xrayHolder, profileStore)
 
 	// Шаблоны
-	funcMap := template.FuncMap{"formatBytes": formatBytes}
+	funcMap := template.FuncMap{
+		"formatBytes": formatBytes,
+		"divGB": func(b int64) string {
+			gb := float64(b) / (1024 * 1024 * 1024)
+			if gb == 0 {
+				return "0"
+			}
+			return fmt.Sprintf("%.1f", gb)
+		},
+	}
 	renderer, err := handlers.NewRenderer(
 		"internal/templates/layouts",
 		"internal/templates",
@@ -74,6 +83,7 @@ func main() {
 	authMW := middleware.NewAuthMiddleware(userStore, cfg.SecretKey)
 	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer)
 	dashHandler := handlers.NewDashboardHandler(profileStore, xrayHolder, cfg, renderer)
+	adminHandler := handlers.NewAdminHandler(userStore, profileStore, xrayHolder, renderer)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -97,6 +107,15 @@ func main() {
 		r.Get("/dashboard", dashHandler.Index)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
 		r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
+
+		// Админка
+		r.Group(func(r chi.Router) {
+			r.Use(authMW.RequireAdmin)
+			r.Get("/admin", adminHandler.Users)
+			r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
+			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
+			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
+		})
 	})
 
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: r}

@@ -1,0 +1,89 @@
+{{template "base" .}}
+
+{{define "title"}}Админка — VPN Panel{{end}}
+
+{{define "nav"}}
+<nav>
+    <span class="brand">VPN Panel</span>
+    <div>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/logout">Выход</a>
+    </div>
+</nav>
+{{end}}
+
+{{define "content"}}
+<h1 style="margin: 1.5rem 0;">Управление пользователями</h1>
+
+{{range .Users}}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
+        <div>
+            <strong style="font-size: 1.1rem;">{{.Username}}</strong>
+            <span style="color: #94a3b8; margin-left: 0.5rem;">{{.Email}}</span>
+            {{if .IsAdmin}}<span class="badge badge-green">admin</span>{{end}}
+            {{if not .IsActive}}<span class="badge badge-red">blocked</span>{{end}}
+        </div>
+        <span class="stat">Σ {{formatBytes .TotalTraffic}}</span>
+    </div>
+
+    {{if .Profiles}}
+    <table>
+        <tr>
+            <th>Профиль</th>
+            <th>Статус</th>
+            <th>Трафик</th>
+            <th>Лимит</th>
+            <th>Действия</th>
+        </tr>
+        {{range .Profiles}}
+        <tr>
+            <td>
+                <strong>{{.Name}}</strong>
+                <div style="font-size: 0.7rem; color: #64748b; font-family: monospace;">{{.UUID}}</div>
+            </td>
+            <td>
+                {{if .IsActive}}
+                    <span class="badge badge-green">active</span>
+                {{else}}
+                    <span class="badge badge-red">disabled</span>
+                {{end}}
+            </td>
+            <td>
+                <span class="stat">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
+            </td>
+            <td>
+                <form method="POST" action="/admin/profiles/{{.ID}}/limit" style="display: flex; gap: 0.3rem; align-items: center;">
+                    <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
+                        style="width: 70px; padding: 0.2rem 0.4rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem;">
+                    <span style="color: #94a3b8; font-size: 0.8rem;">GB</span>
+                    <button type="submit" class="btn btn-sm btn-primary">OK</button>
+                </form>
+            </td>
+            <td>
+                <div style="display: flex; gap: 0.3rem;">
+                    {{if .IsActive}}
+                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle">
+                        <input type="hidden" name="action" value="deactivate">
+                        <button type="submit" class="btn btn-sm btn-danger">Откл</button>
+                    </form>
+                    {{else}}
+                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle">
+                        <input type="hidden" name="action" value="activate">
+                        <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
+                    </form>
+                    {{end}}
+                    <form method="POST" action="/admin/profiles/{{.ID}}/reset" onclick="return confirm('Сбросить трафик?')">
+                        <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Сброс</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {{end}}
+    </table>
+    {{else}}
+    <p style="color: #64748b;">Нет профилей</p>
+    {{end}}
+</div>
+{{end}}
+{{end}}
