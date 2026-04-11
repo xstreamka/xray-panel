@@ -35,10 +35,10 @@
             {{if .IsActive}}
                 {{if .IsOnline}}
                     <span class="badge badge-green" data-stat="status">● online</span>
-                    {{if .OnlineIPs}}<span class="badge" style="background: #1e3a5f; color: #60a5fa;" title="Подключённые IP" data-stat="ips">🌐 {{len .OnlineIPs}}: {{range $i, $ip := .OnlineIPs}}{{if $i}}, {{end}}{{$ip}}{{end}}</span>{{else}}<span class="badge" style="display:none;" data-stat="ips"></span>{{end}}
+                    <span data-stat="ips">{{range .OnlineIPs}}<span class="badge" style="background: #1e3a5f; color: #60a5fa;">{{.}}</span> {{end}}</span>
                 {{else}}
                     <span class="badge" style="background: #1e3a5f; color: #60a5fa;" data-stat="status">active</span>
-                    <span class="badge" style="display:none;" data-stat="ips"></span>
+                    <span data-stat="ips"></span>
                 {{end}}
             {{else if .IsExpired}}
                 <span class="badge badge-red">expired</span>
@@ -160,12 +160,9 @@ function refreshStats() {
                 if (ipsEl) {
                     const ips = s.online_ips || [];
                     if (s.is_online && ips.length > 0) {
-                        ipsEl.style.display = '';
-                        ipsEl.style.background = '#1e3a5f';
-                        ipsEl.style.color = '#60a5fa';
-                        ipsEl.textContent = '🌐 ' + ips.length + ': ' + ips.join(', ');
+                        ipsEl.innerHTML = ips.map(ip => '<span class="badge" style="background:#1e3a5f;color:#60a5fa;">' + ip + '</span> ').join('');
                     } else {
-                        ipsEl.style.display = 'none';
+                        ipsEl.innerHTML = '';
                     }
                 }
             });

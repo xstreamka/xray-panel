@@ -74,14 +74,14 @@
                 {{if .IsActive}}
                     {{if .IsOnline}}
                         <span class="badge badge-green" data-stat="profile-status">● online</span>
-                        {{if .OnlineIPs}}<span class="badge" style="background: #1e3a5f; color: #60a5fa;" title="Подключённые IP" data-stat="profile-ips">🌐 {{len .OnlineIPs}}: {{range $i, $ip := .OnlineIPs}}{{if $i}}, {{end}}{{$ip}}{{end}}</span>{{end}}
+                        <span data-stat="profile-ips">{{range .OnlineIPs}}<span class="badge" style="background: #1e3a5f; color: #60a5fa;">{{.}}</span> {{end}}</span>
                     {{else}}
                         <span class="badge" style="background: #1e3a5f; color: #60a5fa;" data-stat="profile-status">active</span>
-                        <span class="badge" style="display:none;" data-stat="profile-ips"></span>
+                        <span data-stat="profile-ips"></span>
                     {{end}}
                 {{else}}
                     <span class="badge badge-red" data-stat="profile-status">disabled</span>
-                    <span class="badge" style="display:none;" data-stat="profile-ips"></span>
+                    <span data-stat="profile-ips"></span>
                 {{end}}
             </td>
             <td>
@@ -180,12 +180,9 @@ function refreshStats() {
                     if (ipsEl) {
                         const ips = p.online_ips || [];
                         if (p.is_online && ips.length > 0) {
-                            ipsEl.style.display = '';
-                            ipsEl.style.background = '#1e3a5f';
-                            ipsEl.style.color = '#60a5fa';
-                            ipsEl.textContent = '🌐 ' + ips.length + ': ' + ips.join(', ');
+                            ipsEl.innerHTML = ips.map(ip => '<span class="badge" style="background:#1e3a5f;color:#60a5fa;">' + ip + '</span> ').join('');
                         } else {
-                            ipsEl.style.display = 'none';
+                            ipsEl.innerHTML = '';
                         }
                     }
 
