@@ -43,8 +43,16 @@
             <span style="color: #94a3b8; margin-left: 0.5rem;">{{.Email}}</span>
             {{if .IsAdmin}}<span class="badge badge-green">admin</span>{{end}}
             {{if not .IsActive}}<span class="badge badge-red">blocked</span>{{end}}
+            {{if gt .OnlineCount 0}}
+                <span class="badge badge-green">online ({{.OnlineCount}})</span>
+            {{else}}
+                <span class="badge" style="background: #475569; color: #94a3b8;">offline</span>
+            {{end}}
         </div>
-        <span class="stat">Σ {{formatBytes .TotalTraffic}}</span>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <span class="stat" title="Устройства (активные профили)">📱 {{.DeviceCount}} / {{len .Profiles}}</span>
+            <span class="stat">Σ {{formatBytes .TotalTraffic}}</span>
+        </div>
     </div>
 
     {{if .Profiles}}
@@ -64,7 +72,11 @@
             </td>
             <td>
                 {{if .IsActive}}
-                    <span class="badge badge-green">active</span>
+                    {{if .IsOnline}}
+                        <span class="badge badge-green">● online</span>
+                    {{else}}
+                        <span class="badge" style="background: #1e3a5f; color: #60a5fa;">active</span>
+                    {{end}}
                 {{else}}
                     <span class="badge badge-red">disabled</span>
                 {{end}}

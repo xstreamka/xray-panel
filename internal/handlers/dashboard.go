@@ -37,6 +37,7 @@ type profileView struct {
 	ProgressColor string
 	IsExpired     bool
 	IsOverLimit   bool
+	IsOnline      bool
 }
 
 func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
@@ -48,13 +49,17 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Подтягиваем свежую статистику из Xray одним batch-запросом (без сброса)
+	// Подтягиваем свежую статистику и онлайн-статус из Xray
+	onlineUsers := make(map[string]bool)
 	if client := h.xrayHolder.Get(); client != nil {
 		if liveTraffic, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
 			for i, p := range profiles {
 				if stats, ok := liveTraffic[p.UUID]; ok {
 					profiles[i].TrafficUp += stats[0]
 					profiles[i].TrafficDown += stats[1]
+					if stats[0] > 0 || stats[1] > 0 {
+						onlineUsers[p.UUID] = true
+					}
 				}
 			}
 		}
@@ -66,6 +71,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 			VPNProfile:   p,
 			VlessURI:     template.URL(h.buildVlessURI(p.UUID, p.Name)),
 			TrafficTotal: p.TrafficUp + p.TrafficDown,
+			IsOnline:     onlineUsers[p.UUID],
 		}
 
 		if p.TrafficLimit > 0 {

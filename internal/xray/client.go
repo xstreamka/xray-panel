@@ -117,6 +117,22 @@ func (c *Client) GetUserTraffic(ctx context.Context, email string, reset bool) (
 	return up, down, nil
 }
 
+// GetOnlineUsers возвращает множество email-ов с ненулевым трафиком в текущем интервале (приблизительный онлайн)
+func (c *Client) GetOnlineUsers(ctx context.Context) (map[string]bool, error) {
+	traffic, err := c.QueryAllUserTraffic(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+
+	online := make(map[string]bool, len(traffic))
+	for email, stats := range traffic {
+		if stats[0] > 0 || stats[1] > 0 {
+			online[email] = true
+		}
+	}
+	return online, nil
+}
+
 // QueryAllUserTraffic получает стату по всем юзерам разом
 func (c *Client) QueryAllUserTraffic(ctx context.Context, reset bool) (map[string][2]int64, error) {
 	resp, err := c.stats.QueryStats(ctx, &statsService.QueryStatsRequest{
