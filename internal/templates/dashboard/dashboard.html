@@ -28,7 +28,7 @@
 
 {{if .Profiles}}
 {{range .Profiles}}
-<div class="card" {{if not .IsActive}}style="opacity: 0.6;"{{end}}>
+<div class="card" data-profile-id="{{.ID}}" {{if not .IsActive}}style="opacity: 0.6;"{{end}}>
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <div>
             <strong>{{.Name}}</strong>
@@ -56,9 +56,9 @@
     {{end}}
 
     <div class="stats">
-        <span class="stat">↑ {{formatBytes .TrafficUp}}</span>
-        <span class="stat">↓ {{formatBytes .TrafficDown}}</span>
-        <span class="stat">Σ {{formatBytes .TrafficTotal}}</span>
+        <span class="stat" data-stat="up">↑ {{formatBytes .TrafficUp}}</span>
+        <span class="stat" data-stat="down">↓ {{formatBytes .TrafficDown}}</span>
+        <span class="stat" data-stat="total">Σ {{formatBytes .TrafficTotal}}</span>
         {{if .ExpiresAt}}
             <span class="stat">До: {{.ExpiresAt.Format "02.01.2006"}}</span>
         {{end}}
@@ -67,11 +67,11 @@
     {{if gt .TrafficLimit 0}}
     <div style="margin-top: 0.6rem;">
         <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.2rem;">
-            <span>{{formatBytes .TrafficTotal}} / {{formatBytes .TrafficLimit}}</span>
-            <span>{{.UsagePercent}}%</span>
+            <span data-stat="usage-text">{{formatBytes .TrafficTotal}} / {{formatBytes .TrafficLimit}}</span>
+            <span data-stat="usage-pct">{{.UsagePercent}}%</span>
         </div>
         <div style="background: #334155; border-radius: 4px; height: 6px; overflow: hidden;">
-            <div style="background: {{.ProgressColor}}; width: {{.UsagePercent}}%; height: 100%; border-radius: 4px; max-width: 100%;"></div>
+            <div data-stat="progress-bar" style="background: {{.ProgressColor}}; width: {{.UsagePercent}}%; height: 100%; border-radius: 4px; max-width: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
         </div>
     </div>
     {{end}}
@@ -111,7 +111,35 @@ function showQR(btn) {
     modal.style.display = 'flex';
 }
 
-// Автообновление статистики каждые 30 секунд
-setTimeout(() => location.reload(), 30000);
+// AJAX-обновление статистики каждые 10 секунд (без перезагрузки страницы)
+function refreshStats() {
+    fetch('/dashboard/stats')
+        .then(r => r.json())
+        .then(stats => {
+            stats.forEach(s => {
+                const card = document.querySelector(`[data-profile-id="${s.id}"]`);
+                if (!card) return;
+
+                const up = card.querySelector('[data-stat="up"]');
+                const down = card.querySelector('[data-stat="down"]');
+                const total = card.querySelector('[data-stat="total"]');
+                if (up) up.textContent = '↑ ' + s.traffic_up_fmt;
+                if (down) down.textContent = '↓ ' + s.traffic_down_fmt;
+                if (total) total.textContent = 'Σ ' + s.traffic_total_fmt;
+
+                const usageText = card.querySelector('[data-stat="usage-text"]');
+                const usagePct = card.querySelector('[data-stat="usage-pct"]');
+                const bar = card.querySelector('[data-stat="progress-bar"]');
+                if (usageText && s.limit_fmt) usageText.textContent = s.traffic_total_fmt + ' / ' + s.limit_fmt;
+                if (usagePct) usagePct.textContent = s.usage_percent + '%';
+                if (bar) {
+                    bar.style.width = s.usage_percent + '%';
+                    if (s.progress_color) bar.style.background = s.progress_color;
+                }
+            });
+        })
+        .catch(() => {});
+}
+setInterval(refreshStats, 10000);
 </script>
 {{end}}

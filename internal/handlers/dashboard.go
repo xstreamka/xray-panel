@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -47,13 +48,14 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Подтягиваем свежую статистику из Xray (без сброса) для актуальных данных
+	// Подтягиваем свежую статистику из Xray одним batch-запросом (без сброса)
 	if client := h.xrayHolder.Get(); client != nil {
-		for i, p := range profiles {
-			up, down, err := client.GetUserTraffic(r.Context(), p.UUID, false)
-			if err == nil {
-				profiles[i].TrafficUp += up
-				profiles[i].TrafficDown += down
+		if liveTraffic, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
+			for i, p := range profiles {
+				if stats, ok := liveTraffic[p.UUID]; ok {
+					profiles[i].TrafficUp += stats[0]
+					profiles[i].TrafficDown += stats[1]
+				}
 			}
 		}
 	}
@@ -163,6 +165,90 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 	}
 
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+type profileStatsJSON struct {
+	ID              int    `json:"id"`
+	TrafficUp       int64  `json:"traffic_up"`
+	TrafficDown     int64  `json:"traffic_down"`
+	TrafficTotal    int64  `json:"traffic_total"`
+	TrafficUpFmt    string `json:"traffic_up_fmt"`
+	TrafficDownFmt  string `json:"traffic_down_fmt"`
+	TrafficTotalFmt string `json:"traffic_total_fmt"`
+	UsagePercent    int    `json:"usage_percent"`
+	ProgressColor   string `json:"progress_color"`
+	LimitFmt        string `json:"limit_fmt,omitzero"`
+}
+
+func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	profiles, err := h.profiles.GetByUserID(r.Context(), user.ID)
+	if err != nil {
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if client := h.xrayHolder.Get(); client != nil {
+		if liveTraffic, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
+			for i, p := range profiles {
+				if stats, ok := liveTraffic[p.UUID]; ok {
+					profiles[i].TrafficUp += stats[0]
+					profiles[i].TrafficDown += stats[1]
+				}
+			}
+		}
+	}
+
+	result := make([]profileStatsJSON, 0, len(profiles))
+	for _, p := range profiles {
+		total := p.TrafficUp + p.TrafficDown
+		s := profileStatsJSON{
+			ID:              p.ID,
+			TrafficUp:       p.TrafficUp,
+			TrafficDown:     p.TrafficDown,
+			TrafficTotal:    total,
+			TrafficUpFmt:    formatBytesGo(p.TrafficUp),
+			TrafficDownFmt:  formatBytesGo(p.TrafficDown),
+			TrafficTotalFmt: formatBytesGo(total),
+		}
+
+		if p.TrafficLimit > 0 {
+			pct := int(float64(total) / float64(p.TrafficLimit) * 100)
+			if pct > 100 {
+				pct = 100
+			}
+			s.UsagePercent = pct
+			s.LimitFmt = formatBytesGo(p.TrafficLimit)
+
+			switch {
+			case pct >= 90:
+				s.ProgressColor = "#ef4444"
+			case pct >= 70:
+				s.ProgressColor = "#f59e0b"
+			default:
+				s.ProgressColor = "#22c55e"
+			}
+		}
+
+		result = append(result, s)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func formatBytesGo(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %s", float64(b)/float64(div), []string{"KB", "MB", "GB", "TB"}[exp])
 }
 
 func (h *DashboardHandler) buildVlessURI(userUUID, name string) string {

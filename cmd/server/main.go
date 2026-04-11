@@ -105,6 +105,7 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(authMW.RequireAuth)
 		r.Get("/dashboard", dashHandler.Index)
+		r.Get("/dashboard/stats", dashHandler.StatsJSON)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
 		r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
 
@@ -159,7 +160,7 @@ func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, p
 
 		syncUsersToXray(ctx, client, profiles)
 
-		collector := xray.NewStatsCollector(client, profiles, 30*time.Second)
+		collector := xray.NewStatsCollector(client, profiles, 10*time.Second)
 		collector.Run(ctx)
 		return
 	}
