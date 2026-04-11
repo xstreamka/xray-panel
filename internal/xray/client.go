@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	handlerService "github.com/xtls/xray-core/app/proxyman/command"
@@ -129,11 +130,14 @@ func (c *Client) QueryAllUserTraffic(ctx context.Context, reset bool) (map[strin
 	// Парсим: user>>>email>>>traffic>>>uplink|downlink
 	result := make(map[string][2]int64)
 	for _, stat := range resp.GetStat() {
-		var email, direction string
-		_, err := fmt.Sscanf(stat.GetName(), "user>>>%s>>>traffic>>>%s", &email, &direction)
-		if err != nil {
+		// stat.Name = "user>>>uuid>>>traffic>>>uplink" или "...>>>downlink"
+		parts := strings.Split(stat.GetName(), ">>>")
+		if len(parts) != 4 {
 			continue
 		}
+		email := parts[1]
+		direction := parts[3]
+
 		entry := result[email]
 		switch direction {
 		case "uplink":
