@@ -153,27 +153,24 @@ func (c *Client) GetOnlineUsers(ctx context.Context, liveTraffic map[string][2]i
 	return online, nil
 }
 
-// GetOnlineIPCounts возвращает количество уникальных IP (устройств) на каждого онлайн-пользователя.
-// Если Xray поддерживает online tracking — использует GetStatsOnline для точного подсчёта.
-// Иначе ставит 1 для каждого онлайн-пользователя.
-func (c *Client) GetOnlineIPCounts(ctx context.Context, onlineUsers map[string]bool) (map[string]int, error) {
-
-	counts := make(map[string]int, len(onlineUsers))
+// GetOnlineIPs возвращает списки подключённых IP для каждого онлайн-пользователя.
+// Использует GetStatsOnlineIpList API. Если API недоступен — возвращает пустые списки.
+func (c *Client) GetOnlineIPs(ctx context.Context, onlineUsers map[string]bool) map[string][]string {
+	result := make(map[string][]string, len(onlineUsers))
 	for email := range onlineUsers {
-		resp, err := c.stats.GetStatsOnline(ctx, &statsService.GetStatsRequest{
+		resp, err := c.stats.GetStatsOnlineIpList(ctx, &statsService.GetStatsRequest{
 			Name: fmt.Sprintf("user>>>%s>>>online", email),
 		})
 		if err != nil {
-			counts[email] = 1
 			continue
 		}
-		count := int(resp.GetStat().GetValue())
-		if count < 1 {
-			count = 1
+		ips := make([]string, 0, len(resp.GetIps()))
+		for ip := range resp.GetIps() {
+			ips = append(ips, ip)
 		}
-		counts[email] = count
+		result[email] = ips
 	}
-	return counts, nil
+	return result
 }
 
 // QueryAllUserTraffic получает стату по всем юзерам разом

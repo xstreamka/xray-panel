@@ -50,7 +50,7 @@
             {{end}}
         </div>
         <div style="display: flex; gap: 1rem; align-items: center;">
-            <span class="stat" title="Устройства (активные профили)">📱 {{.DeviceCount}} / {{len .Profiles}}</span>
+            <span class="stat" title="Профили (активные / всего)">📱 {{.ActiveCount}} / {{len .Profiles}}</span>
             <span class="stat" data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</span>
         </div>
     </div>
@@ -74,14 +74,14 @@
                 {{if .IsActive}}
                     {{if .IsOnline}}
                         <span class="badge badge-green" data-stat="profile-status">● online</span>
-                        <span class="badge" style="background: #1e3a5f; color: #60a5fa;{{if le .DeviceCount 1}} display:none;{{end}}" title="Подключённых устройств (уникальных IP)" data-stat="profile-devices">📱 {{.DeviceCount}}</span>
+                        {{if .OnlineIPs}}<span class="badge" style="background: #1e3a5f; color: #60a5fa;" title="Подключённые IP" data-stat="profile-ips">🌐 {{len .OnlineIPs}}: {{range $i, $ip := .OnlineIPs}}{{if $i}}, {{end}}{{$ip}}{{end}}</span>{{end}}
                     {{else}}
                         <span class="badge" style="background: #1e3a5f; color: #60a5fa;" data-stat="profile-status">active</span>
-                        <span class="badge" style="background: #1e3a5f; color: #60a5fa; display:none;" title="Подключённых устройств (уникальных IP)" data-stat="profile-devices"></span>
+                        <span class="badge" style="display:none;" data-stat="profile-ips"></span>
                     {{end}}
                 {{else}}
                     <span class="badge badge-red" data-stat="profile-status">disabled</span>
-                    <span class="badge" style="display:none;" data-stat="profile-devices"></span>
+                    <span class="badge" style="display:none;" data-stat="profile-ips"></span>
                 {{end}}
             </td>
             <td>
@@ -159,7 +159,7 @@ function refreshStats() {
                     if (!row) return;
 
                     const status = row.querySelector('[data-stat="profile-status"]');
-                    const devices = row.querySelector('[data-stat="profile-devices"]');
+                    const ipsEl = row.querySelector('[data-stat="profile-ips"]');
                     const traffic = row.querySelector('[data-stat="profile-traffic"]');
 
                     if (status) {
@@ -177,12 +177,15 @@ function refreshStats() {
                         }
                     }
 
-                    if (devices) {
-                        if (p.is_online && p.device_count > 1) {
-                            devices.style.display = '';
-                            devices.textContent = '📱 ' + p.device_count;
+                    if (ipsEl) {
+                        const ips = p.online_ips || [];
+                        if (p.is_online && ips.length > 0) {
+                            ipsEl.style.display = '';
+                            ipsEl.style.background = '#1e3a5f';
+                            ipsEl.style.color = '#60a5fa';
+                            ipsEl.textContent = '🌐 ' + ips.length + ': ' + ips.join(', ');
                         } else {
-                            devices.style.display = 'none';
+                            ipsEl.style.display = 'none';
                         }
                     }
 

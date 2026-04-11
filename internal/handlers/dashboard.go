@@ -38,7 +38,7 @@ type profileView struct {
 	IsExpired     bool
 	IsOverLimit   bool
 	IsOnline      bool
-	DeviceCount   int
+	OnlineIPs     []string
 }
 
 func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +52,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 
 	// Подтягиваем свежую статистику, онлайн-статус и количество устройств из Xray
 	onlineUsers := make(map[string]bool)
-	onlineIPCounts := make(map[string]int)
+	var onlineIPs map[string][]string
 	if client := h.xrayHolder.Get(); client != nil {
 		var liveTraffic map[string][2]int64
 		if lt, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
@@ -67,9 +67,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		if online, err := client.GetOnlineUsers(r.Context(), liveTraffic); err == nil {
 			onlineUsers = online
 		}
-		if counts, err := client.GetOnlineIPCounts(r.Context(), onlineUsers); err == nil {
-			onlineIPCounts = counts
-		}
+		onlineIPs = client.GetOnlineIPs(r.Context(), onlineUsers)
 	}
 
 	var views []profileView
@@ -79,7 +77,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 			VlessURI:     template.URL(h.buildVlessURI(p.UUID, p.Name)),
 			TrafficTotal: p.TrafficUp + p.TrafficDown,
 			IsOnline:     onlineUsers[p.UUID],
-			DeviceCount:  onlineIPCounts[p.UUID],
+			OnlineIPs:    onlineIPs[p.UUID],
 		}
 
 		if p.TrafficLimit > 0 {
@@ -182,18 +180,18 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 }
 
 type profileStatsJSON struct {
-	ID              int    `json:"id"`
-	TrafficUp       int64  `json:"traffic_up"`
-	TrafficDown     int64  `json:"traffic_down"`
-	TrafficTotal    int64  `json:"traffic_total"`
-	TrafficUpFmt    string `json:"traffic_up_fmt"`
-	TrafficDownFmt  string `json:"traffic_down_fmt"`
-	TrafficTotalFmt string `json:"traffic_total_fmt"`
-	UsagePercent    int    `json:"usage_percent"`
-	ProgressColor   string `json:"progress_color"`
-	LimitFmt        string `json:"limit_fmt,omitzero"`
-	IsOnline        bool   `json:"is_online"`
-	DeviceCount     int    `json:"device_count"`
+	ID              int      `json:"id"`
+	TrafficUp       int64    `json:"traffic_up"`
+	TrafficDown     int64    `json:"traffic_down"`
+	TrafficTotal    int64    `json:"traffic_total"`
+	TrafficUpFmt    string   `json:"traffic_up_fmt"`
+	TrafficDownFmt  string   `json:"traffic_down_fmt"`
+	TrafficTotalFmt string   `json:"traffic_total_fmt"`
+	UsagePercent    int      `json:"usage_percent"`
+	ProgressColor   string   `json:"progress_color"`
+	LimitFmt        string   `json:"limit_fmt,omitzero"`
+	IsOnline        bool     `json:"is_online"`
+	OnlineIPs       []string `json:"online_ips"`
 }
 
 func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +204,7 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	onlineUsers := make(map[string]bool)
-	onlineIPCounts := make(map[string]int)
+	var onlineIPs map[string][]string
 	if client := h.xrayHolder.Get(); client != nil {
 		var liveTraffic map[string][2]int64
 		if lt, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
@@ -221,9 +219,7 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		if online, err := client.GetOnlineUsers(r.Context(), liveTraffic); err == nil {
 			onlineUsers = online
 		}
-		if counts, err := client.GetOnlineIPCounts(r.Context(), onlineUsers); err == nil {
-			onlineIPCounts = counts
-		}
+		onlineIPs = client.GetOnlineIPs(r.Context(), onlineUsers)
 	}
 
 	result := make([]profileStatsJSON, 0, len(profiles))
@@ -238,7 +234,7 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			TrafficDownFmt:  formatBytesGo(p.TrafficDown),
 			TrafficTotalFmt: formatBytesGo(total),
 			IsOnline:        onlineUsers[p.UUID],
-			DeviceCount:     onlineIPCounts[p.UUID],
+			OnlineIPs:       onlineIPs[p.UUID],
 		}
 
 		if p.TrafficLimit > 0 {

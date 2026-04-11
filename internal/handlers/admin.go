@@ -36,31 +36,29 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем онлайн-статус и количество устройств из Xray
+	// Получаем онлайн-статус и IP-адреса из Xray
 	onlineUsers := make(map[string]bool)
-	onlineIPCounts := make(map[string]int)
+	var onlineIPs map[string][]string
 	if client := h.xrayHolder.Get(); client != nil {
 		if online, err := client.GetOnlineUsers(r.Context(), nil); err == nil {
 			onlineUsers = online
 		}
-		if counts, err := client.GetOnlineIPCounts(r.Context(), onlineUsers); err == nil {
-			onlineIPCounts = counts
-		}
+		onlineIPs = client.GetOnlineIPs(r.Context(), onlineUsers)
 	}
 
 	// Группируем профили по user_id
 	type profileView struct {
 		models.VPNProfile
-		IsOnline    bool
-		DeviceCount int
+		IsOnline  bool
+		OnlineIPs []string
 	}
 
 	profilesByUser := make(map[int][]profileView)
 	for _, p := range profiles {
 		pv := profileView{
-			VPNProfile:  p,
-			IsOnline:    onlineUsers[p.UUID],
-			DeviceCount: onlineIPCounts[p.UUID],
+			VPNProfile: p,
+			IsOnline:   onlineUsers[p.UUID],
+			OnlineIPs:  onlineIPs[p.UUID],
 		}
 		profilesByUser[p.UserID] = append(profilesByUser[p.UserID], pv)
 	}
@@ -69,7 +67,7 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 		models.User
 		Profiles     []profileView
 		TotalTraffic int64
-		DeviceCount  int
+		ActiveCount  int
 		OnlineCount  int
 	}
 
@@ -79,7 +77,7 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 		for _, p := range v.Profiles {
 			v.TotalTraffic += p.TrafficUp + p.TrafficDown
 			if p.IsActive {
-				v.DeviceCount++
+				v.ActiveCount++
 			}
 			if p.IsOnline {
 				v.OnlineCount++
@@ -169,11 +167,11 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 }
 
 type adminProfileStatsJSON struct {
-	ID          int    `json:"id"`
-	IsOnline    bool   `json:"is_online"`
-	DeviceCount int    `json:"device_count"`
-	TrafficUp   string `json:"traffic_up_fmt"`
-	TrafficDown string `json:"traffic_down_fmt"`
+	ID          int      `json:"id"`
+	IsOnline    bool     `json:"is_online"`
+	OnlineIPs   []string `json:"online_ips"`
+	TrafficUp   string   `json:"traffic_up_fmt"`
+	TrafficDown string   `json:"traffic_down_fmt"`
 }
 
 type adminUserStatsJSON struct {
@@ -197,7 +195,7 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	onlineUsers := make(map[string]bool)
-	onlineIPCounts := make(map[string]int)
+	var onlineIPs map[string][]string
 	if client := h.xrayHolder.Get(); client != nil {
 		var liveTraffic map[string][2]int64
 		if lt, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
@@ -212,22 +210,20 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		if online, err := client.GetOnlineUsers(r.Context(), liveTraffic); err == nil {
 			onlineUsers = online
 		}
-		if counts, err := client.GetOnlineIPCounts(r.Context(), onlineUsers); err == nil {
-			onlineIPCounts = counts
-		}
+		onlineIPs = client.GetOnlineIPs(r.Context(), onlineUsers)
 	}
 
 	type profByUser struct {
 		models.VPNProfile
-		IsOnline    bool
-		DeviceCount int
+		IsOnline  bool
+		OnlineIPs []string
 	}
 	profilesByUser := make(map[int][]profByUser)
 	for _, p := range profiles {
 		profilesByUser[p.UserID] = append(profilesByUser[p.UserID], profByUser{
-			VPNProfile:  p,
-			IsOnline:    onlineUsers[p.UUID],
-			DeviceCount: onlineIPCounts[p.UUID],
+			VPNProfile: p,
+			IsOnline:   onlineUsers[p.UUID],
+			OnlineIPs:  onlineIPs[p.UUID],
 		})
 	}
 
@@ -243,7 +239,7 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			uv.Profiles = append(uv.Profiles, adminProfileStatsJSON{
 				ID:          p.ID,
 				IsOnline:    p.IsOnline,
-				DeviceCount: p.DeviceCount,
+				OnlineIPs:   p.OnlineIPs,
 				TrafficUp:   formatBytesGo(p.TrafficUp),
 				TrafficDown: formatBytesGo(p.TrafficDown),
 			})

@@ -35,10 +35,10 @@
             {{if .IsActive}}
                 {{if .IsOnline}}
                     <span class="badge badge-green" data-stat="status">● online</span>
-                    <span class="badge" style="background: #1e3a5f; color: #60a5fa;{{if eq .DeviceCount 0}} display:none;{{end}}" title="Подключённых устройств" data-stat="devices">📱 {{.DeviceCount}}</span>
+                    {{if .OnlineIPs}}<span class="badge" style="background: #1e3a5f; color: #60a5fa;" title="Подключённые IP" data-stat="ips">🌐 {{len .OnlineIPs}}: {{range $i, $ip := .OnlineIPs}}{{if $i}}, {{end}}{{$ip}}{{end}}</span>{{else}}<span class="badge" style="display:none;" data-stat="ips"></span>{{end}}
                 {{else}}
                     <span class="badge" style="background: #1e3a5f; color: #60a5fa;" data-stat="status">active</span>
-                    <span class="badge" style="background: #1e3a5f; color: #60a5fa; display:none;" title="Подключённых устройств" data-stat="devices"></span>
+                    <span class="badge" style="display:none;" data-stat="ips"></span>
                 {{end}}
             {{else if .IsExpired}}
                 <span class="badge badge-red">expired</span>
@@ -143,9 +143,9 @@ function refreshStats() {
                     if (s.progress_color) bar.style.background = s.progress_color;
                 }
 
-                // Обновляем онлайн-статус и количество устройств
+                // Обновляем онлайн-статус и IP-адреса
                 const statusEl = card.querySelector('[data-stat="status"]');
-                const devicesEl = card.querySelector('[data-stat="devices"]');
+                const ipsEl = card.querySelector('[data-stat="ips"]');
                 if (statusEl) {
                     if (s.is_online) {
                         statusEl.className = 'badge badge-green';
@@ -157,12 +157,15 @@ function refreshStats() {
                         statusEl.textContent = 'active';
                     }
                 }
-                if (devicesEl) {
-                    if (s.is_online && s.device_count > 0) {
-                        devicesEl.style.display = '';
-                        devicesEl.textContent = '📱 ' + s.device_count;
+                if (ipsEl) {
+                    const ips = s.online_ips || [];
+                    if (s.is_online && ips.length > 0) {
+                        ipsEl.style.display = '';
+                        ipsEl.style.background = '#1e3a5f';
+                        ipsEl.style.color = '#60a5fa';
+                        ipsEl.textContent = '🌐 ' + ips.length + ': ' + ips.join(', ');
                     } else {
-                        devicesEl.style.display = 'none';
+                        ipsEl.style.display = 'none';
                     }
                 }
             });
