@@ -121,6 +121,7 @@ func (c *Client) GetUserTraffic(ctx context.Context, email string, reset bool) (
 func (c *Client) GetOnlineUsers(ctx context.Context) (map[string]bool, error) {
 	resp, err := c.stats.GetAllOnlineUsers(ctx, &statsService.GetAllOnlineUsersRequest{})
 	if err != nil {
+		log.Printf("[DEBUG] GetAllOnlineUsers error: %v, falling back to traffic", err)
 		// Fallback на старый метод через трафик
 		traffic, err := c.QueryAllUserTraffic(ctx, false)
 		if err != nil {
@@ -132,8 +133,11 @@ func (c *Client) GetOnlineUsers(ctx context.Context) (map[string]bool, error) {
 				online[email] = true
 			}
 		}
+		log.Printf("[DEBUG] GetOnlineUsers fallback: %d online from traffic", len(online))
 		return online, nil
 	}
+
+	log.Printf("[DEBUG] GetAllOnlineUsers raw response: users=%v", resp.GetUsers())
 
 	online := make(map[string]bool, len(resp.GetUsers()))
 	for _, raw := range resp.GetUsers() {
@@ -143,8 +147,10 @@ func (c *Client) GetOnlineUsers(ctx context.Context) (map[string]bool, error) {
 		if len(parts) >= 2 {
 			email = parts[1]
 		}
+		log.Printf("[DEBUG] GetOnlineUsers: raw=%q → email=%q", raw, email)
 		online[email] = true
 	}
+	log.Printf("[DEBUG] GetOnlineUsers result: %d online users", len(online))
 	return online, nil
 }
 
@@ -161,10 +167,12 @@ func (c *Client) GetOnlineIPCounts(ctx context.Context) (map[string]int, error) 
 			Name: fmt.Sprintf("user>>>%s>>>online", email),
 		})
 		if err != nil {
+			log.Printf("[DEBUG] GetStatsOnline error for %s: %v", email, err)
 			counts[email] = 1 // онлайн, но не удалось получить кол-во — минимум 1
 			continue
 		}
 		count := int(resp.GetStat().GetValue())
+		log.Printf("[DEBUG] GetStatsOnline for %s: value=%d", email, count)
 		if count < 1 {
 			count = 1
 		}
