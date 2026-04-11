@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-vpnpanel}
+      POSTGRES_PASSWORD: ${DB_PASS:-vpnpanel}
+      POSTGRES_DB: ${DB_NAME:-vpnpanel}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-vpnpanel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  xray:
+    image: teddysun/xray:latest
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      panel:
+        condition: service_started
+    volumes:
+      - xray-config:/etc/xray
+
+  panel:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    network_mode: host
+    environment:
+      LISTEN_ADDR: ":${LISTEN_PORT:-8080}"
+      SECRET_KEY: ${SECRET_KEY:-change-me-to-random-string-32ch}
+      DB_HOST: "127.0.0.1"
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-vpnpanel}
+      DB_PASS: ${DB_PASS:-vpnpanel}
+      DB_NAME: ${DB_NAME:-vpnpanel}
+      XRAY_API_ADDR: "127.0.0.1:${XRAY_API_PORT:-10085}"
+      XRAY_INBOUND_TAG: ${XRAY_INBOUND_TAG:-vless-in}
+      XRAY_CONFIG_PATH: /etc/xray/config.json
+      SERVER_ADDR: ${SERVER_ADDR}
+      SERVER_PORT: ${SERVER_PORT:-443}
+      REALITY_DEST: ${REALITY_DEST:-www.google.com:443}
+      REALITY_SERVER_NAME: ${REALITY_SERVER_NAME:-www.google.com}
+      REALITY_PRIVATE_KEY: ${REALITY_PRIVATE_KEY}
+      REALITY_PUBLIC_KEY: ${REALITY_PUBLIC_KEY}
+      REALITY_SHORT_ID: ${REALITY_SHORT_ID}
+      AMSTERDAM_ADDR: ${AMSTERDAM_ADDR}
+      AMSTERDAM_PORT: ${AMSTERDAM_PORT:-443}
+      AMSTERDAM_UUID: ${AMSTERDAM_UUID}
+      AMSTERDAM_SNI: ${AMSTERDAM_SNI:-www.google.com}
+      AMSTERDAM_PUBLIC_KEY: ${AMSTERDAM_PUBLIC_KEY}
+      AMSTERDAM_SHORT_ID: ${AMSTERDAM_SHORT_ID}
+    volumes:
+      - xray-config:/etc/xray
+
+volumes:
+  pgdata:
+  xray-config:

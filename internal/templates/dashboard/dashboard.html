@@ -1,0 +1,73 @@
+{{template "base" .}}
+
+{{define "title"}}Dashboard — VPN Panel{{end}}
+
+{{define "nav"}}
+<nav>
+    <span class="brand">VPN Panel</span>
+    <div>
+        <span style="color: #e2e8f0;">{{.User.Username}}</span>
+        {{if .User.IsAdmin}}<a href="/admin">Админка</a>{{end}}
+        <a href="/logout">Выход</a>
+    </div>
+</nav>
+{{end}}
+
+{{define "content"}}
+<h1 style="margin: 1.5rem 0;">Мои VPN профили</h1>
+
+<div class="card">
+    <form method="POST" action="/dashboard/profiles" style="display: flex; gap: 0.5rem; align-items: end;">
+        <div style="flex: 1;">
+            <label for="name">Имя профиля</label>
+            <input type="text" id="name" name="name" placeholder="phone, laptop, ..." style="margin-bottom: 0;">
+        </div>
+        <button type="submit" class="btn btn-primary">Создать профиль</button>
+    </form>
+</div>
+
+{{if .Profiles}}
+{{range .Profiles}}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <strong>{{.Name}}</strong>
+            {{if .IsActive}}
+                <span class="badge badge-green">active</span>
+            {{else}}
+                <span class="badge badge-red">disabled</span>
+            {{end}}
+        </div>
+        <div>
+            <button class="btn btn-sm btn-primary" onclick="copyURI(this)" data-uri="{{.VlessURI}}">Копировать URI</button>
+        </div>
+    </div>
+    <div class="uri-box">{{.VlessURI}}</div>
+    <div class="stats">
+        <span class="stat">↑ {{formatBytes .TrafficUp}}</span>
+        <span class="stat">↓ {{formatBytes .TrafficDown}}</span>
+        {{if gt .TrafficLimit 0}}
+            <span class="stat">Лимит: {{formatBytes .TrafficLimit}}</span>
+        {{end}}
+        {{if .ExpiresAt}}
+            <span class="stat">До: {{.ExpiresAt.Format "02.01.2006"}}</span>
+        {{end}}
+    </div>
+</div>
+{{end}}
+{{else}}
+<div class="card" style="text-align: center; color: #94a3b8;">
+    У вас пока нет VPN профилей. Создайте первый!
+</div>
+{{end}}
+
+<script>
+function copyURI(btn) {
+    navigator.clipboard.writeText(btn.dataset.uri).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = 'Скопировано!';
+        setTimeout(() => btn.textContent = orig, 1500);
+    });
+}
+</script>
+{{end}}

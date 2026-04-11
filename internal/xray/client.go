@@ -1,0 +1,148 @@
+package xray
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	handlerService "github.com/xtls/xray-core/app/proxyman/command"
+	statsService "github.com/xtls/xray-core/app/stats/command"
+	"github.com/xtls/xray-core/common/protocol"
+	"github.com/xtls/xray-core/common/serial"
+	"github.com/xtls/xray-core/proxy/vless"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+type Client struct {
+	conn    *grpc.ClientConn
+	handler handlerService.HandlerServiceClient
+	stats   statsService.StatsServiceClient
+	tag     string // inbound tag
+}
+
+func NewClient(addr string, inboundTag string) (*Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("grpc dial %s: %w", addr, err)
+	}
+
+	return &Client{
+		conn:    conn,
+		handler: handlerService.NewHandlerServiceClient(conn),
+		stats:   statsService.NewStatsServiceClient(conn),
+		tag:     inboundTag,
+	}, nil
+}
+
+func (c *Client) Close() {
+	if c.conn != nil {
+		c.conn.Close()
+	}
+}
+
+// AddUser добавляет пользователя в Xray inbound (VLESS)
+func (c *Client) AddUser(ctx context.Context, uuid string, email string) error {
+	account := serial.ToTypedMessage(&vless.Account{
+		Id:   uuid,
+		Flow: "xtls-rprx-vision",
+	})
+
+	resp, err := c.handler.AlterInbound(ctx, &handlerService.AlterInboundRequest{
+		Tag: c.tag,
+		Operation: serial.ToTypedMessage(&handlerService.AddUserOperation{
+			User: &protocol.User{
+				Level:   0,
+				Email:   email,
+				Account: account,
+			},
+		}),
+	})
+	if err != nil {
+		return fmt.Errorf("add user %s: %w", email, err)
+	}
+
+	log.Printf("Xray: user added: %s (resp: %v)", email, resp)
+	return nil
+}
+
+// RemoveUser удаляет пользователя из Xray inbound
+func (c *Client) RemoveUser(ctx context.Context, email string) error {
+	_, err := c.handler.AlterInbound(ctx, &handlerService.AlterInboundRequest{
+		Tag: c.tag,
+		Operation: serial.ToTypedMessage(&handlerService.RemoveUserOperation{
+			Email: email,
+		}),
+	})
+	if err != nil {
+		return fmt.Errorf("remove user %s: %w", email, err)
+	}
+
+	log.Printf("Xray: user removed: %s", email)
+	return nil
+}
+
+// GetUserTraffic получает статистику трафика пользователя
+// Xray хранит стату по email: user>>>email>>>traffic>>>uplink / downlink
+func (c *Client) GetUserTraffic(ctx context.Context, email string, reset bool) (up, down int64, err error) {
+	upResp, err := c.stats.GetStats(ctx, &statsService.GetStatsRequest{
+		Name:   fmt.Sprintf("user>>>%s>>>traffic>>>uplink", email),
+		Reset_: reset,
+	})
+	if err != nil {
+		// Если стата ещё не появилась — не ошибка
+		up = 0
+	} else {
+		up = upResp.GetStat().GetValue()
+	}
+
+	downResp, err := c.stats.GetStats(ctx, &statsService.GetStatsRequest{
+		Name:   fmt.Sprintf("user>>>%s>>>traffic>>>downlink", email),
+		Reset_: reset,
+	})
+	if err != nil {
+		down = 0
+	} else {
+		down = downResp.GetStat().GetValue()
+	}
+
+	return up, down, nil
+}
+
+// QueryAllUserTraffic получает стату по всем юзерам разом
+func (c *Client) QueryAllUserTraffic(ctx context.Context, reset bool) (map[string][2]int64, error) {
+	resp, err := c.stats.QueryStats(ctx, &statsService.QueryStatsRequest{
+		Pattern: "user>>>",
+		Reset_:  reset,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("query stats: %w", err)
+	}
+
+	// Парсим: user>>>email>>>traffic>>>uplink|downlink
+	result := make(map[string][2]int64)
+	for _, stat := range resp.GetStat() {
+		var email, direction string
+		_, err := fmt.Sscanf(stat.GetName(), "user>>>%s>>>traffic>>>%s", &email, &direction)
+		if err != nil {
+			continue
+		}
+		entry := result[email]
+		switch direction {
+		case "uplink":
+			entry[0] = stat.GetValue()
+		case "downlink":
+			entry[1] = stat.GetValue()
+		}
+		result[email] = entry
+	}
+
+	return result, nil
+}

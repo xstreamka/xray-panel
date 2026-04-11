@@ -1,0 +1,22 @@
+{{template "base" .}}
+
+{{define "title"}}Вход — VPN Panel{{end}}
+
+{{define "content"}}
+<div style="max-width: 400px; margin: 4rem auto;">
+    <div class="card">
+        <h2 style="margin-bottom: 1.5rem; text-align: center;">Вход</h2>
+        {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+        <form method="POST" action="/login">
+            <label for="username">Логин</label>
+            <input type="text" id="username" name="username" required autofocus>
+            <label for="password">Пароль</label>
+            <input type="password" id="password" name="password" required>
+            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;">Войти</button>
+        </form>
+        <p style="text-align: center; margin-top: 1rem; color: #94a3b8;">
+            Нет аккаунта? <a href="/register" style="color: #38bdf8;">Регистрация</a>
+        </p>
+    </div>
+</div>
+{{end}}
