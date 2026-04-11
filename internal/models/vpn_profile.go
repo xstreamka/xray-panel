@@ -158,6 +158,32 @@ func (s *VPNProfileStore) GetAllActiveUUIDs(ctx context.Context) ([]string, erro
 	return uuids, nil
 }
 
+// GetAllInactiveUUIDs — UUID профилей, которые НЕ должны быть активны в Xray
+func (s *VPNProfileStore) GetAllInactiveUUIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT vp.uuid FROM vpn_profiles vp
+		 JOIN users u ON u.id = vp.user_id
+		 WHERE vp.is_active = FALSE
+		    OR u.is_active = FALSE
+		    OR (vp.expires_at IS NOT NULL AND vp.expires_at <= NOW())
+		    OR (vp.traffic_limit > 0 AND vp.traffic_up + vp.traffic_down >= vp.traffic_limit)`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var uuids []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			return nil, err
+		}
+		uuids = append(uuids, uuid)
+	}
+	return uuids, nil
+}
+
 // GetExceeded — активные профили, превысившие лимит или с истёкшим сроком
 func (s *VPNProfileStore) GetExceeded(ctx context.Context) ([]VPNProfile, error) {
 	rows, err := s.pool.Query(ctx,

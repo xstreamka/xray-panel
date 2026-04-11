@@ -167,9 +167,26 @@ func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, p
 }
 
 func syncUsersToXray(ctx context.Context, client *xray.Client, profiles *models.VPNProfileStore) {
+	// Удаляем неактивных пользователей из Xray (могли остаться из старого конфига)
+	inactiveUUIDs, err := profiles.GetAllInactiveUUIDs(ctx)
+	if err != nil {
+		log.Printf("Sync: failed to get inactive UUIDs: %v", err)
+	} else {
+		removed := 0
+		for _, uuid := range inactiveUUIDs {
+			if err := client.RemoveUser(ctx, uuid); err == nil {
+				removed++
+			}
+		}
+		if removed > 0 {
+			log.Printf("Sync: removed %d inactive users from Xray", removed)
+		}
+	}
+
+	// Добавляем активных пользователей
 	uuids, err := profiles.GetAllActiveUUIDs(ctx)
 	if err != nil {
-		log.Printf("Sync: failed to get UUIDs: %v", err)
+		log.Printf("Sync: failed to get active UUIDs: %v", err)
 		return
 	}
 
@@ -181,7 +198,7 @@ func syncUsersToXray(ctx context.Context, client *xray.Client, profiles *models.
 			added++
 		}
 	}
-	log.Printf("Sync: %d/%d users synced to Xray", added, len(uuids))
+	log.Printf("Sync: %d/%d active users synced to Xray", added, len(uuids))
 }
 
 func formatBytes(b int64) string {
