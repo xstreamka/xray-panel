@@ -28,31 +28,53 @@
 
 {{if .Profiles}}
 {{range .Profiles}}
-<div class="card">
+<div class="card" {{if not .IsActive}}style="opacity: 0.6;"{{end}}>
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <div>
             <strong>{{.Name}}</strong>
             {{if .IsActive}}
                 <span class="badge badge-green">active</span>
+            {{else if .IsExpired}}
+                <span class="badge badge-red">expired</span>
+            {{else if .IsOverLimit}}
+                <span class="badge badge-red">лимит</span>
             {{else}}
                 <span class="badge badge-red">disabled</span>
             {{end}}
         </div>
-        <div>
-            <button class="btn btn-sm btn-primary" onclick="copyURI(this)" data-uri="{{.VlessURI}}">Копировать URI</button>
+        <div style="display: flex; gap: 0.4rem;">
+            <button class="btn btn-sm btn-primary" onclick="copyURI(this)" data-uri="{{.VlessURI}}">Копировать</button>
+            <button class="btn btn-sm btn-primary" onclick="showQR(this)" data-uri="{{.VlessURI}}">QR</button>
+            <form method="POST" action="/dashboard/profiles/{{.ID}}/delete" style="display:inline;">
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль?')">✕</button>
+            </form>
         </div>
     </div>
+
+    {{if .IsActive}}
     <div class="uri-box">{{.VlessURI}}</div>
+    {{end}}
+
     <div class="stats">
         <span class="stat">↑ {{formatBytes .TrafficUp}}</span>
         <span class="stat">↓ {{formatBytes .TrafficDown}}</span>
-        {{if gt .TrafficLimit 0}}
-            <span class="stat">Лимит: {{formatBytes .TrafficLimit}}</span>
-        {{end}}
+        <span class="stat">Σ {{formatBytes .TrafficTotal}}</span>
         {{if .ExpiresAt}}
             <span class="stat">До: {{.ExpiresAt.Format "02.01.2006"}}</span>
         {{end}}
     </div>
+
+    {{if gt .TrafficLimit 0}}
+    <div style="margin-top: 0.6rem;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.2rem;">
+            <span>{{formatBytes .TrafficTotal}} / {{formatBytes .TrafficLimit}}</span>
+            <span>{{.UsagePercent}}%</span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 6px; overflow: hidden;">
+            <div style="background: {{.ProgressColor}}; width: {{.UsagePercent}}%; height: 100%; border-radius: 4px; max-width: 100%;"></div>
+        </div>
+    </div>
+    {{end}}
 </div>
 {{end}}
 {{else}}
@@ -61,12 +83,27 @@
 </div>
 {{end}}
 
+<!-- QR модалка -->
+<div id="qr-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; align-items:center; justify-content:center;" onclick="this.style.display='none'">
+    <div style="background: white; padding: 1.5rem; border-radius: 12px;" onclick="event.stopPropagation()">
+        <canvas id="qr-canvas"></canvas>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 <script>
 function copyURI(btn) {
     navigator.clipboard.writeText(btn.dataset.uri).then(() => {
         const orig = btn.textContent;
-        btn.textContent = 'Скопировано!';
+        btn.textContent = '✓';
         setTimeout(() => btn.textContent = orig, 1500);
+    });
+}
+function showQR(btn) {
+    const modal = document.getElementById('qr-modal');
+    const canvas = document.getElementById('qr-canvas');
+    QRCode.toCanvas(canvas, btn.dataset.uri, {width: 280, margin: 2}, function(err) {
+        if (!err) modal.style.display = 'flex';
     });
 }
 </script>

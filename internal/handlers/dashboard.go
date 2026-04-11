@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"time"
 
 	"xray-panel/internal/config"
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
 	"xray-panel/internal/xray"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +27,16 @@ func NewDashboardHandler(profiles *models.VPNProfileStore, xrayHolder *xray.Hold
 	return &DashboardHandler{profiles: profiles, xrayHolder: xrayHolder, cfg: cfg, renderer: renderer}
 }
 
+type profileView struct {
+	models.VPNProfile
+	VlessURI      string
+	TrafficTotal  int64
+	UsagePercent  int
+	ProgressColor string
+	IsExpired     bool
+	IsOverLimit   bool
+}
+
 func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
@@ -33,17 +46,37 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type profileView struct {
-		models.VPNProfile
-		VlessURI string
-	}
-
 	var views []profileView
 	for _, p := range profiles {
-		views = append(views, profileView{
-			VPNProfile: p,
-			VlessURI:   h.buildVlessURI(p.UUID, p.Name),
-		})
+		v := profileView{
+			VPNProfile:   p,
+			VlessURI:     h.buildVlessURI(p.UUID, p.Name),
+			TrafficTotal: p.TrafficUp + p.TrafficDown,
+		}
+
+		if p.TrafficLimit > 0 {
+			pct := int(float64(v.TrafficTotal) / float64(p.TrafficLimit) * 100)
+			if pct > 100 {
+				pct = 100
+			}
+			v.UsagePercent = pct
+			v.IsOverLimit = v.TrafficTotal >= p.TrafficLimit
+
+			switch {
+			case pct >= 90:
+				v.ProgressColor = "#ef4444" // красный
+			case pct >= 70:
+				v.ProgressColor = "#f59e0b" // жёлтый
+			default:
+				v.ProgressColor = "#22c55e" // зелёный
+			}
+		}
+
+		if p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now()) {
+			v.IsExpired = true
+		}
+
+		views = append(views, v)
 	}
 
 	h.renderer.Render(w, "dashboard.html", map[string]any{
@@ -71,6 +104,50 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 		if err := client.AddUser(r.Context(), newUUID, newUUID); err != nil {
 			log.Printf("Warning: failed to add user to Xray: %v", err)
 		}
+	}
+
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	// Проверяем что профиль принадлежит юзеру
+	profiles, err := h.profiles.GetByUserID(r.Context(), user.ID)
+	if err != nil {
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	var targetUUID string
+	for _, p := range profiles {
+		if p.ID == id {
+			targetUUID = p.UUID
+			break
+		}
+	}
+
+	if targetUUID == "" {
+		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		return
+	}
+
+	// Удаляем из Xray
+	if client := h.xrayHolder.Get(); client != nil {
+		if err := client.RemoveUser(r.Context(), targetUUID); err != nil {
+			log.Printf("Warning: failed to remove user from Xray: %v", err)
+		}
+	}
+
+	// Удаляем из БД
+	if _, err := h.profiles.Delete(r.Context(), id); err != nil {
+		log.Printf("Delete profile error: %v", err)
 	}
 
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)

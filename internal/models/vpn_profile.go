@@ -157,3 +157,31 @@ func (s *VPNProfileStore) GetAllActiveUUIDs(ctx context.Context) ([]string, erro
 	}
 	return uuids, nil
 }
+
+// GetExceeded — активные профили, превысившие лимит или с истёкшим сроком
+func (s *VPNProfileStore) GetExceeded(ctx context.Context) ([]VPNProfile, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT p.id, p.user_id, p.uuid, p.name, p.is_active, p.traffic_up, p.traffic_down, p.traffic_limit, p.expires_at, p.created_at, p.updated_at
+		 FROM vpn_profiles p
+		 WHERE p.is_active = TRUE
+		   AND (
+		     (p.traffic_limit > 0 AND p.traffic_up + p.traffic_down >= p.traffic_limit)
+		     OR
+		     (p.expires_at IS NOT NULL AND p.expires_at <= NOW())
+		   )`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var profiles []VPNProfile
+	for rows.Next() {
+		var p VPNProfile
+		if err := rows.Scan(&p.ID, &p.UserID, &p.UUID, &p.Name, &p.IsActive, &p.TrafficUp, &p.TrafficDown, &p.TrafficLimit, &p.ExpiresAt, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		profiles = append(profiles, p)
+	}
+	return profiles, nil
+}

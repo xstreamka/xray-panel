@@ -96,6 +96,7 @@ func main() {
 		r.Use(authMW.RequireAuth)
 		r.Get("/dashboard", dashHandler.Index)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
+		r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
 	})
 
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: r}

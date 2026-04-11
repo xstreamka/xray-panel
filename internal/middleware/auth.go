@@ -61,7 +61,7 @@ func (m *AuthMiddleware) SetSession(w http.ResponseWriter, userID int) {
 		Value:    value + "|" + sig,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, //TODO: поменять на true когда будет за nginx с HTTPS
+		Secure:   false, // поменять на true когда будет за nginx с HTTPS
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400 * 30, // 30 дней
 	}
