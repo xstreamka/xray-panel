@@ -17,7 +17,7 @@ services:
       retries: 5
 
   xray:
-    image: teddysun/xray:latest
+    image: ghcr.io/xtls/xray-core:latest
     restart: unless-stopped
     network_mode: host
     depends_on:
@@ -25,6 +25,7 @@ services:
         condition: service_started
     volumes:
       - xray-config:/etc/xray
+    command: ["run", "-c", "/etc/xray/config.json"]
 
   panel:
     build: .
