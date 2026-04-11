@@ -51,10 +51,6 @@
         </div>
     </div>
 
-    {{if .IsActive}}
-    <div class="uri-box">{{.VlessURI}}</div>
-    {{end}}
-
     <div class="stats">
         <span class="stat">↑ {{formatBytes .TrafficUp}}</span>
         <span class="stat">↓ {{formatBytes .TrafficDown}}</span>
@@ -86,11 +82,11 @@
 <!-- QR модалка -->
 <div id="qr-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; align-items:center; justify-content:center;" onclick="this.style.display='none'">
     <div style="background: white; padding: 1.5rem; border-radius: 12px;" onclick="event.stopPropagation()">
-        <canvas id="qr-canvas"></canvas>
+        <div id="qr-canvas"></div>
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
 <script>
 function copyURI(btn) {
     navigator.clipboard.writeText(btn.dataset.uri).then(() => {
@@ -101,10 +97,14 @@ function copyURI(btn) {
 }
 function showQR(btn) {
     const modal = document.getElementById('qr-modal');
-    const canvas = document.getElementById('qr-canvas');
-    QRCode.toCanvas(canvas, btn.dataset.uri, {width: 280, margin: 2}, function(err) {
-        if (!err) modal.style.display = 'flex';
+    const container = document.getElementById('qr-canvas');
+    container.innerHTML = '';
+    new QRCode(container, {
+        text: btn.dataset.uri,
+        width: 280,
+        height: 280,
     });
+    modal.style.display = 'flex';
 }
 </script>
 {{end}}

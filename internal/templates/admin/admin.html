@@ -13,7 +13,27 @@
 {{end}}
 
 {{define "content"}}
-<h1 style="margin: 1.5rem 0;">Управление пользователями</h1>
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin: 1.5rem 0;">
+    <h1>Управление пользователями</h1>
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <span style="color: #94a3b8; font-size: 0.85rem;">Обновление:</span>
+        <select id="refresh-interval" onchange="setRefresh(this.value)"
+            style="padding: 0.3rem 0.5rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem;">
+            <option value="0">выкл</option>
+            <option value="5">5 сек</option>
+            <option value="10">10 сек</option>
+            <option value="15">15 сек</option>
+            <option value="30" selected>30 сек</option>
+            <option value="60">1 мин</option>
+            <option value="300">5 мин</option>
+            <option value="600">10 мин</option>
+            <option value="1800">30 мин</option>
+            <option value="3600">1 час</option>
+        </select>
+        <span id="refresh-countdown" style="color: #64748b; font-size: 0.8rem; min-width: 30px;"></span>
+    </div>
+</div>
 
 {{range .Users}}
 <div class="card">
@@ -86,4 +106,37 @@
     {{end}}
 </div>
 {{end}}
+<script>
+let timer = null;
+let countdown = null;
+let remaining = 0;
+
+function setRefresh(sec) {
+    clearInterval(timer);
+    clearInterval(countdown);
+    localStorage.setItem('admin-refresh', sec);
+    sec = parseInt(sec);
+    if (sec === 0) {
+        document.getElementById('refresh-countdown').textContent = '';
+        return;
+    }
+    remaining = sec;
+    updateCountdown();
+    countdown = setInterval(updateCountdown, 1000);
+    timer = setInterval(() => location.reload(), sec * 1000);
+}
+
+function updateCountdown() {
+    document.getElementById('refresh-countdown').textContent = remaining + 'с';
+    remaining--;
+    if (remaining < 0) remaining = parseInt(document.getElementById('refresh-interval').value);
+}
+
+// Восстанавливаем из localStorage
+(function() {
+    const saved = localStorage.getItem('admin-refresh') || '30';
+    document.getElementById('refresh-interval').value = saved;
+    setRefresh(saved);
+})();
+</script>
 {{end}}

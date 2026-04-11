@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"strconv"
@@ -29,7 +30,7 @@ func NewDashboardHandler(profiles *models.VPNProfileStore, xrayHolder *xray.Hold
 
 type profileView struct {
 	models.VPNProfile
-	VlessURI      string
+	VlessURI      template.URL
 	TrafficTotal  int64
 	UsagePercent  int
 	ProgressColor string
@@ -50,7 +51,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 	for _, p := range profiles {
 		v := profileView{
 			VPNProfile:   p,
-			VlessURI:     h.buildVlessURI(p.UUID, p.Name),
+			VlessURI:     template.URL(h.buildVlessURI(p.UUID, p.Name)),
 			TrafficTotal: p.TrafficUp + p.TrafficDown,
 		}
 

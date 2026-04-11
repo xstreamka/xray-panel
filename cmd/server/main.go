@@ -159,7 +159,7 @@ func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, p
 
 		syncUsersToXray(ctx, client, profiles)
 
-		collector := xray.NewStatsCollector(client, profiles, 60*time.Second)
+		collector := xray.NewStatsCollector(client, profiles, 30*time.Second)
 		collector.Run(ctx)
 		return
 	}
