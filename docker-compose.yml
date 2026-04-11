@@ -20,6 +20,7 @@ services:
     image: ghcr.io/xtls/xray-core:latest
     restart: unless-stopped
     network_mode: host
+    user: "0:0"
     depends_on:
       panel:
         condition: service_started
