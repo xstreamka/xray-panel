@@ -117,49 +117,46 @@ func (c *Client) GetUserTraffic(ctx context.Context, email string, reset bool) (
 	return up, down, nil
 }
 
-// GetOnlineUsers возвращает множество email-ов онлайн-пользователей (через Xray online stats API)
-func (c *Client) GetOnlineUsers(ctx context.Context) (map[string]bool, error) {
+// GetOnlineUsers возвращает множество email-ов онлайн-пользователей.
+// Сначала пробует GetAllOnlineUsers API (Xray online tracking).
+// Если API недоступен или возвращает пустой результат — определяет по наличию
+// ненулевого трафика (можно передать уже полученный traffic, чтобы не дёргать API дважды).
+func (c *Client) GetOnlineUsers(ctx context.Context, liveTraffic map[string][2]int64) (map[string]bool, error) {
+	// 1. Пробуем native online tracking API
 	resp, err := c.stats.GetAllOnlineUsers(ctx, &statsService.GetAllOnlineUsersRequest{})
-	if err != nil {
-		log.Printf("[DEBUG] GetAllOnlineUsers error: %v, falling back to traffic", err)
-		// Fallback на старый метод через трафик
-		traffic, err := c.QueryAllUserTraffic(ctx, false)
-		if err != nil {
-			return nil, err
-		}
-		online := make(map[string]bool, len(traffic))
-		for email, stats := range traffic {
-			if stats[0] > 0 || stats[1] > 0 {
-				online[email] = true
+	if err == nil && len(resp.GetUsers()) > 0 {
+		online := make(map[string]bool, len(resp.GetUsers()))
+		for _, raw := range resp.GetUsers() {
+			// API возвращает "user>>>email>>>online" — извлекаем email
+			email := raw
+			if parts := strings.SplitN(raw, ">>>", 3); len(parts) >= 2 {
+				email = parts[1]
 			}
+			online[email] = true
 		}
-		log.Printf("[DEBUG] GetOnlineUsers fallback: %d online from traffic", len(online))
 		return online, nil
 	}
 
-	log.Printf("[DEBUG] GetAllOnlineUsers raw response: users=%v", resp.GetUsers())
-
-	online := make(map[string]bool, len(resp.GetUsers()))
-	for _, raw := range resp.GetUsers() {
-		// API возвращает полный ключ "user>>>email>>>online" — извлекаем email
-		email := raw
-		parts := strings.SplitN(raw, ">>>", 3)
-		if len(parts) >= 2 {
-			email = parts[1]
+	// 2. Fallback: определяем по ненулевому трафику в текущем интервале
+	if liveTraffic == nil {
+		liveTraffic, err = c.QueryAllUserTraffic(ctx, false)
+		if err != nil {
+			return nil, err
 		}
-		log.Printf("[DEBUG] GetOnlineUsers: raw=%q → email=%q", raw, email)
-		online[email] = true
 	}
-	log.Printf("[DEBUG] GetOnlineUsers result: %d online users", len(online))
+	online := make(map[string]bool, len(liveTraffic))
+	for email, stats := range liveTraffic {
+		if stats[0] > 0 || stats[1] > 0 {
+			online[email] = true
+		}
+	}
 	return online, nil
 }
 
-// GetOnlineIPCounts возвращает количество уникальных IP (устройств) на каждого онлайн-пользователя
-func (c *Client) GetOnlineIPCounts(ctx context.Context) (map[string]int, error) {
-	onlineUsers, err := c.GetOnlineUsers(ctx)
-	if err != nil {
-		return nil, err
-	}
+// GetOnlineIPCounts возвращает количество уникальных IP (устройств) на каждого онлайн-пользователя.
+// Если Xray поддерживает online tracking — использует GetStatsOnline для точного подсчёта.
+// Иначе ставит 1 для каждого онлайн-пользователя.
+func (c *Client) GetOnlineIPCounts(ctx context.Context, onlineUsers map[string]bool) (map[string]int, error) {
 
 	counts := make(map[string]int, len(onlineUsers))
 	for email := range onlineUsers {
@@ -167,12 +164,10 @@ func (c *Client) GetOnlineIPCounts(ctx context.Context) (map[string]int, error) 
 			Name: fmt.Sprintf("user>>>%s>>>online", email),
 		})
 		if err != nil {
-			log.Printf("[DEBUG] GetStatsOnline error for %s: %v", email, err)
-			counts[email] = 1 // онлайн, но не удалось получить кол-во — минимум 1
+			counts[email] = 1
 			continue
 		}
 		count := int(resp.GetStat().GetValue())
-		log.Printf("[DEBUG] GetStatsOnline for %s: value=%d", email, count)
 		if count < 1 {
 			count = 1
 		}

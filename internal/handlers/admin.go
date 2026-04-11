@@ -40,10 +40,10 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 	onlineUsers := make(map[string]bool)
 	onlineIPCounts := make(map[string]int)
 	if client := h.xrayHolder.Get(); client != nil {
-		if online, err := client.GetOnlineUsers(r.Context()); err == nil {
+		if online, err := client.GetOnlineUsers(r.Context(), nil); err == nil {
 			onlineUsers = online
 		}
-		if counts, err := client.GetOnlineIPCounts(r.Context()); err == nil {
+		if counts, err := client.GetOnlineIPCounts(r.Context(), onlineUsers); err == nil {
 			onlineIPCounts = counts
 		}
 	}
@@ -199,7 +199,9 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	onlineUsers := make(map[string]bool)
 	onlineIPCounts := make(map[string]int)
 	if client := h.xrayHolder.Get(); client != nil {
-		if liveTraffic, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
+		var liveTraffic map[string][2]int64
+		if lt, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
+			liveTraffic = lt
 			for i, p := range profiles {
 				if stats, ok := liveTraffic[p.UUID]; ok {
 					profiles[i].TrafficUp += stats[0]
@@ -207,10 +209,10 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		if online, err := client.GetOnlineUsers(r.Context()); err == nil {
+		if online, err := client.GetOnlineUsers(r.Context(), liveTraffic); err == nil {
 			onlineUsers = online
 		}
-		if counts, err := client.GetOnlineIPCounts(r.Context()); err == nil {
+		if counts, err := client.GetOnlineIPCounts(r.Context(), onlineUsers); err == nil {
 			onlineIPCounts = counts
 		}
 	}
