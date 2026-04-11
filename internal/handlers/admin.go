@@ -35,25 +35,31 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем онлайн-статус из Xray
+	// Получаем онлайн-статус и количество устройств из Xray
 	onlineUsers := make(map[string]bool)
+	onlineIPCounts := make(map[string]int)
 	if client := h.xrayHolder.Get(); client != nil {
 		if online, err := client.GetOnlineUsers(r.Context()); err == nil {
 			onlineUsers = online
+		}
+		if counts, err := client.GetOnlineIPCounts(r.Context()); err == nil {
+			onlineIPCounts = counts
 		}
 	}
 
 	// Группируем профили по user_id
 	type profileView struct {
 		models.VPNProfile
-		IsOnline bool
+		IsOnline    bool
+		DeviceCount int
 	}
 
 	profilesByUser := make(map[int][]profileView)
 	for _, p := range profiles {
 		pv := profileView{
-			VPNProfile: p,
-			IsOnline:   onlineUsers[p.UUID],
+			VPNProfile:  p,
+			IsOnline:    onlineUsers[p.UUID],
+			DeviceCount: onlineIPCounts[p.UUID],
 		}
 		profilesByUser[p.UserID] = append(profilesByUser[p.UserID], pv)
 	}

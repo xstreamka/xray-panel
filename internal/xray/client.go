@@ -117,20 +117,54 @@ func (c *Client) GetUserTraffic(ctx context.Context, email string, reset bool) (
 	return up, down, nil
 }
 
-// GetOnlineUsers возвращает множество email-ов с ненулевым трафиком в текущем интервале (приблизительный онлайн)
+// GetOnlineUsers возвращает множество email-ов онлайн-пользователей (через Xray online stats API)
 func (c *Client) GetOnlineUsers(ctx context.Context) (map[string]bool, error) {
-	traffic, err := c.QueryAllUserTraffic(ctx, false)
+	resp, err := c.stats.GetAllOnlineUsers(ctx, &statsService.GetAllOnlineUsersRequest{})
+	if err != nil {
+		// Fallback на старый метод через трафик
+		traffic, err := c.QueryAllUserTraffic(ctx, false)
+		if err != nil {
+			return nil, err
+		}
+		online := make(map[string]bool, len(traffic))
+		for email, stats := range traffic {
+			if stats[0] > 0 || stats[1] > 0 {
+				online[email] = true
+			}
+		}
+		return online, nil
+	}
+
+	online := make(map[string]bool, len(resp.GetUsers()))
+	for _, email := range resp.GetUsers() {
+		online[email] = true
+	}
+	return online, nil
+}
+
+// GetOnlineIPCounts возвращает количество уникальных IP (устройств) на каждого онлайн-пользователя
+func (c *Client) GetOnlineIPCounts(ctx context.Context) (map[string]int, error) {
+	onlineUsers, err := c.GetOnlineUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	online := make(map[string]bool, len(traffic))
-	for email, stats := range traffic {
-		if stats[0] > 0 || stats[1] > 0 {
-			online[email] = true
+	counts := make(map[string]int, len(onlineUsers))
+	for email := range onlineUsers {
+		resp, err := c.stats.GetStatsOnline(ctx, &statsService.GetStatsRequest{
+			Name: fmt.Sprintf("user>>>%s>>>online", email),
+		})
+		if err != nil {
+			counts[email] = 1 // онлайн, но не удалось получить кол-во — минимум 1
+			continue
 		}
+		count := int(resp.GetStat().GetValue())
+		if count < 1 {
+			count = 1
+		}
+		counts[email] = count
 	}
-	return online, nil
+	return counts, nil
 }
 
 // QueryAllUserTraffic получает стату по всем юзерам разом

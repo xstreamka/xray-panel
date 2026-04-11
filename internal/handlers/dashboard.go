@@ -38,6 +38,7 @@ type profileView struct {
 	IsExpired     bool
 	IsOverLimit   bool
 	IsOnline      bool
+	DeviceCount   int
 }
 
 func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
@@ -49,19 +50,23 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Подтягиваем свежую статистику и онлайн-статус из Xray
+	// Подтягиваем свежую статистику, онлайн-статус и количество устройств из Xray
 	onlineUsers := make(map[string]bool)
+	onlineIPCounts := make(map[string]int)
 	if client := h.xrayHolder.Get(); client != nil {
 		if liveTraffic, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
 			for i, p := range profiles {
 				if stats, ok := liveTraffic[p.UUID]; ok {
 					profiles[i].TrafficUp += stats[0]
 					profiles[i].TrafficDown += stats[1]
-					if stats[0] > 0 || stats[1] > 0 {
-						onlineUsers[p.UUID] = true
-					}
 				}
 			}
+		}
+		if online, err := client.GetOnlineUsers(r.Context()); err == nil {
+			onlineUsers = online
+		}
+		if counts, err := client.GetOnlineIPCounts(r.Context()); err == nil {
+			onlineIPCounts = counts
 		}
 	}
 
@@ -72,6 +77,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 			VlessURI:     template.URL(h.buildVlessURI(p.UUID, p.Name)),
 			TrafficTotal: p.TrafficUp + p.TrafficDown,
 			IsOnline:     onlineUsers[p.UUID],
+			DeviceCount:  onlineIPCounts[p.UUID],
 		}
 
 		if p.TrafficLimit > 0 {
