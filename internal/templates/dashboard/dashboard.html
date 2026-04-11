@@ -51,6 +51,10 @@
         </div>
     </div>
 
+    {{if .IsActive}}
+    <div class="uri-box">{{.VlessURI}}</div>
+    {{end}}
+
     <div class="stats">
         <span class="stat">↑ {{formatBytes .TrafficUp}}</span>
         <span class="stat">↓ {{formatBytes .TrafficDown}}</span>
