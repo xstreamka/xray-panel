@@ -141,6 +141,10 @@ func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "activate":
+		// Убираем iptables-блокировку
+		if fw := h.xrayHolder.GetFirewall(); fw != nil {
+			fw.UnblockUser(profile.UUID)
+		}
 		if err := h.profiles.SetActive(r.Context(), id, true); err != nil {
 			log.Printf("Admin: activate error: %v", err)
 		}
@@ -149,6 +153,10 @@ func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Admin: xray add error: %v", err)
 			}
 		}
+		// Обновляем лимит в collector
+		if collector := h.xrayHolder.GetCollector(); collector != nil {
+			collector.UpdateLimit(profile.UUID, profile.TrafficLimit)
+		}
 		log.Printf("Admin: profile %s activated", profile.UUID)
 
 	case "deactivate":
@@ -156,7 +164,10 @@ func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Admin: deactivate error: %v", err)
 		}
 		if client := h.xrayHolder.Get(); client != nil {
-			client.KillConnections(r.Context(), profile.UUID)
+			// Блокируем TCP через iptables (правила живут до реактивации)
+			if fw := h.xrayHolder.GetFirewall(); fw != nil {
+				fw.BlockUser(r.Context(), client, profile.UUID)
+			}
 			if err := client.RemoveUser(r.Context(), profile.UUID); err != nil {
 				log.Printf("Admin: xray remove error: %v", err)
 			}
@@ -207,9 +218,17 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !profile.IsActive {
+		// Убираем iptables-блокировку
+		if fw := h.xrayHolder.GetFirewall(); fw != nil {
+			fw.UnblockUser(profile.UUID)
+		}
 		h.profiles.SetActive(r.Context(), id, true)
 		if client := h.xrayHolder.Get(); client != nil {
 			client.AddUser(r.Context(), profile.UUID, profile.UUID)
+		}
+		// Восстанавливаем лимит в collector
+		if collector := h.xrayHolder.GetCollector(); collector != nil {
+			collector.UpdateLimit(profile.UUID, profile.TrafficLimit)
 		}
 		log.Printf("Admin: profile %s reactivated after traffic reset", profile.UUID)
 	}

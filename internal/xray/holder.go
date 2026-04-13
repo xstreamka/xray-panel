@@ -2,12 +2,12 @@ package xray
 
 import "sync"
 
-// Holder — потокобезопасная обёртка для Client и StatsCollector.
-// Нужна потому что Xray может стартовать позже панели.
+// Holder — потокобезопасная обёртка для Client, StatsCollector и Firewall.
 type Holder struct {
 	mu        sync.RWMutex
 	client    *Client
 	collector *StatsCollector
+	firewall  *Firewall
 }
 
 func NewHolder() *Holder {
@@ -36,4 +36,16 @@ func (h *Holder) GetCollector() *StatsCollector {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.collector
+}
+
+func (h *Holder) SetFirewall(f *Firewall) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.firewall = f
+}
+
+func (h *Holder) GetFirewall() *Firewall {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.firewall
 }

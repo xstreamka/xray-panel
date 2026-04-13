@@ -146,6 +146,11 @@ func main() {
 }
 
 func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, profiles *models.VPNProfileStore) {
+	// Инициализируем firewall (iptables chain) до подключения к Xray
+	firewall := xray.NewFirewall()
+	firewall.Init()
+	holder.SetFirewall(firewall)
+
 	for i := 0; i < 30; i++ {
 		select {
 		case <-ctx.Done():
@@ -164,7 +169,7 @@ func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, p
 
 		syncUsersToXray(ctx, client, profiles)
 
-		collector := xray.NewStatsCollector(client, profiles)
+		collector := xray.NewStatsCollector(client, profiles, firewall)
 		collector.InitCumulative(ctx)
 		holder.SetCollector(collector)
 		collector.Run(ctx)

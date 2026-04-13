@@ -12,6 +12,7 @@ import (
 type StatsCollector struct {
 	client   *Client
 	profiles *models.VPNProfileStore
+	firewall *Firewall
 
 	// pending хранит трафик, который не удалось записать в БД
 	pending map[string][2]int64
@@ -34,10 +35,11 @@ type StatsCollector struct {
 	lastFullEnforce time.Time
 }
 
-func NewStatsCollector(client *Client, profiles *models.VPNProfileStore) *StatsCollector {
+func NewStatsCollector(client *Client, profiles *models.VPNProfileStore, firewall *Firewall) *StatsCollector {
 	return &StatsCollector{
 		client:     client,
 		profiles:   profiles,
+		firewall:   firewall,
 		pending:    make(map[string][2]int64),
 		cumulative: make(map[string]int64),
 		limits:     make(map[string]int64),
@@ -183,15 +185,15 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 	}
 }
 
-// disconnectUser отключает пользователя: убивает TCP-сессии, удаляет из Xray, деактивирует в БД
+// disconnectUser отключает пользователя: блокирует TCP через iptables, удаляет из Xray, деактивирует в БД
 func (s *StatsCollector) disconnectUser(ctx context.Context, uuid string, total, limit int64) {
 	// Сразу обнуляем лимит в кэше, чтобы следующие циклы не спамили повторными попытками
 	s.limitsMu.Lock()
 	s.limits[uuid] = 0
 	s.limitsMu.Unlock()
 
-	// 1. Убиваем активные TCP-соединения (пока юзер ещё в Xray и IP доступны)
-	killed := s.client.KillConnections(ctx, uuid)
+	// 1. Блокируем TCP через iptables REJECT (правила живут до реактивации!)
+	blocked := s.firewall.BlockUser(ctx, s.client, uuid)
 
 	// 2. Удаляем из Xray (ошибка "not found" — не страшно, мог быть удалён ранее)
 	if err := s.client.RemoveUser(ctx, uuid); err != nil {
@@ -211,8 +213,8 @@ func (s *StatsCollector) disconnectUser(ctx context.Context, uuid string, total,
 	}
 
 	overshoot := total - limit
-	log.Printf("Enforce: %s disabled — limit %d, total %d, overshoot %.1f MB, killed %d connections",
-		uuid, limit, total, float64(overshoot)/(1024*1024), killed)
+	log.Printf("Enforce: %s disabled — limit %d, total %d, overshoot %.1f MB, blocked %d IPs",
+		uuid, limit, total, float64(overshoot)/(1024*1024), blocked)
 }
 
 // updateOnlineStatus — медленный цикл: онлайн-статус и IP-адреса
@@ -244,9 +246,9 @@ func (s *StatsCollector) enforceAll(ctx context.Context) {
 	}
 
 	for _, p := range exceeded {
+		s.firewall.BlockUser(ctx, s.client, p.UUID)
 		if err := s.client.RemoveUser(ctx, p.UUID); err != nil {
-			log.Printf("EnforceAll: failed to remove %s: %v", p.UUID, err)
-			continue
+			log.Printf("EnforceAll: RemoveUser %s: %v", p.UUID, err)
 		}
 		if err := s.profiles.SetActive(ctx, p.ID, false); err != nil {
 			log.Printf("EnforceAll: failed to deactivate %s: %v", p.UUID, err)
