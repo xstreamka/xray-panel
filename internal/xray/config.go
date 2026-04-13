@@ -154,16 +154,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"domainStrategy": "UseIPv4",
 				},
 			},
-			// Block
-			{
-				"tag":      "block",
-				"protocol": "blackhole",
-				"settings": map[string]any{
-					"response": map[string]any{
-						"type": "http",
-					},
-				},
-			},
 		},
 
 		// Routing
@@ -177,13 +167,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"inboundTag":  []string{"api-in"},
 					"outboundTag": "api",
 				},
-				// 2. Реклама → block
-				{
-					"type":        "field",
-					"domain":      []string{"geosite:category-ads-all"},
-					"outboundTag": "block",
-				},
-				// 3. РФ домены → direct
+				// 2. РФ домены → direct
 				{
 					"type": "field",
 					"domain": []string{
@@ -205,22 +189,23 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 						"domain:gosuslugi.ru",
 						"domain:nalog.gov.ru",
 						"domain:mos.ru",
+						"domain:zvuk.com",
 					},
 					"outboundTag": "direct",
 				},
-				// 4. РФ IP → direct (подстраховка через IPIfNonMatch)
+				// 3. РФ IP → direct (подстраховка через IPIfNonMatch)
 				{
 					"type":        "field",
 					"ip":          []string{"geoip:ru"},
 					"outboundTag": "direct",
 				},
-				// 5. Приватные сети
+				// 4. Приватные сети
 				{
 					"type":        "field",
 					"ip":          []string{"geoip:private"},
 					"outboundTag": "direct",
 				},
-				// 6. Всё остальное → Амстердам
+				// 5. Всё остальное → Амстердам
 				{
 					"type":        "field",
 					"inboundTag":  []string{cfg.XrayInboundTag},
