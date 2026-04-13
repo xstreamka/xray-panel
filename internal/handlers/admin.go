@@ -176,6 +176,14 @@ func (h *AdminHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Admin: set limit error: %v", err)
 	}
 
+	// Обновляем лимит в кэше collector'а
+	profile, err := h.profiles.GetByID(r.Context(), id)
+	if err == nil {
+		if collector := h.xrayHolder.GetCollector(); collector != nil {
+			collector.UpdateLimit(profile.UUID, limitBytes)
+		}
+	}
+
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
@@ -190,6 +198,11 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.profiles.ResetTraffic(r.Context(), id); err != nil {
 		log.Printf("Admin: reset traffic error: %v", err)
+	}
+
+	// Сбрасываем кумулятивный счётчик в collector'е
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.ResetCumulative(profile.UUID)
 	}
 
 	if !profile.IsActive {

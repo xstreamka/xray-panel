@@ -12,33 +12,39 @@ import (
 type StatsCollector struct {
 	client   *Client
 	profiles *models.VPNProfileStore
-	interval time.Duration
 
 	// pending хранит трафик, который не удалось записать в БД
 	pending map[string][2]int64
 
-	// Кэш для HTTP-хендлеров (чтобы не дёргать gRPC на каждый запрос)
+	// Кумулятивный трафик в памяти — для быстрого enforce без запроса к БД.
+	// Ключ — UUID, значение — total bytes (из БД + все дельты).
+	cumulative   map[string]int64
+	cumulativeMu sync.Mutex
+
+	// Лимиты в памяти — чтобы не дёргать БД на каждую проверку
+	limits   map[string]int64 // uuid → traffic_limit (0 = без лимита)
+	limitsMu sync.RWMutex
+
+	// Кэш для HTTP-хендлеров
 	snapMu        sync.RWMutex
 	lastTraffic   map[string][2]int64
 	lastOnline    map[string]bool
 	lastOnlineIPs map[string][]string
 
-	// Подстраховка: полная проверка лимитов раз в минуту
 	lastFullEnforce time.Time
 }
 
-func NewStatsCollector(client *Client, profiles *models.VPNProfileStore, interval time.Duration) *StatsCollector {
+func NewStatsCollector(client *Client, profiles *models.VPNProfileStore) *StatsCollector {
 	return &StatsCollector{
-		client:   client,
-		profiles: profiles,
-		interval: interval,
-		pending:  make(map[string][2]int64),
+		client:     client,
+		profiles:   profiles,
+		pending:    make(map[string][2]int64),
+		cumulative: make(map[string]int64),
+		limits:     make(map[string]int64),
 	}
 }
 
-// Snapshot возвращает потокобезопасный снимок статистики для HTTP-хендлеров.
-// Трафик — это незаписанные дельты с момента последнего reset (для отображения «живых» цифр).
-// Хендлеры должны прибавлять эти дельты к значениям из БД.
+// Snapshot возвращает потокобезопасный снимок для HTTP-хендлеров.
 func (s *StatsCollector) Snapshot() (
 	traffic map[string][2]int64,
 	online map[string]bool,
@@ -49,53 +55,77 @@ func (s *StatsCollector) Snapshot() (
 	return s.lastTraffic, s.lastOnline, s.lastOnlineIPs
 }
 
-func (s *StatsCollector) Run(ctx context.Context) {
-	log.Printf("Stats collector started (interval: %s)", s.interval)
+// InitCumulative загружает текущий трафик и лимиты из БД в память.
+// Вызывать при старте и периодически для ресинхронизации.
+func (s *StatsCollector) InitCumulative(ctx context.Context) {
+	profiles, err := s.profiles.ListAll(ctx)
+	if err != nil {
+		log.Printf("Stats: failed to init cumulative: %v", err)
+		return
+	}
 
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
+	s.cumulativeMu.Lock()
+	s.limitsMu.Lock()
+
+	for _, p := range profiles {
+		s.cumulative[p.UUID] = p.TrafficUp + p.TrafficDown
+		s.limits[p.UUID] = p.TrafficLimit
+	}
+
+	s.limitsMu.Unlock()
+	s.cumulativeMu.Unlock()
+
+	log.Printf("Stats: cumulative initialized for %d profiles", len(profiles))
+}
+
+// UpdateLimit обновляет лимит в кэше (вызывать из админки при смене лимита)
+func (s *StatsCollector) UpdateLimit(uuid string, limitBytes int64) {
+	s.limitsMu.Lock()
+	s.limits[uuid] = limitBytes
+	s.limitsMu.Unlock()
+}
+
+// ResetCumulative сбрасывает кумулятивный счётчик (вызывать при сбросе трафика)
+func (s *StatsCollector) ResetCumulative(uuid string) {
+	s.cumulativeMu.Lock()
+	s.cumulative[uuid] = 0
+	s.cumulativeMu.Unlock()
+}
+
+func (s *StatsCollector) Run(ctx context.Context) {
+	log.Println("Stats collector started")
+
+	// Быстрый цикл: сбор трафика + enforce (каждую секунду)
+	fastTicker := time.NewTicker(1 * time.Second)
+	defer fastTicker.Stop()
+
+	// Медленный цикл: онлайн-статус и IP (каждые 5 секунд)
+	slowTicker := time.NewTicker(5 * time.Second)
+	defer slowTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Stats collector stopped")
 			return
-		case <-ticker.C:
-			s.collect(ctx)
+		case <-fastTicker.C:
+			s.collectAndEnforce(ctx)
+		case <-slowTicker.C:
+			s.updateOnlineStatus(ctx)
 		}
 	}
 }
 
-func (s *StatsCollector) collect(ctx context.Context) {
-	// 1. Получаем живой трафик БЕЗ сброса — для снимка и онлайн-статуса
-	liveTraffic, err := s.client.QueryAllUserTraffic(ctx, false)
-	if err != nil {
-		log.Printf("Stats collect error (live): %v", err)
-		return
-	}
-
-	// 2. Обновляем онлайн-статус
-	onlineUsers := make(map[string]bool)
-	if online, err := s.client.GetOnlineUsers(ctx, liveTraffic); err == nil {
-		onlineUsers = online
-	}
-	onlineIPs := s.client.GetOnlineIPs(ctx, onlineUsers)
-
-	// 3. Сохраняем снимок для HTTP-хендлеров
-	s.snapMu.Lock()
-	s.lastTraffic = liveTraffic
-	s.lastOnline = onlineUsers
-	s.lastOnlineIPs = onlineIPs
-	s.snapMu.Unlock()
-
-	// 4. Теперь забираем дельту СО СБРОСОМ — для записи в БД
+// collectAndEnforce — быстрый цикл: один gRPC → in-memory enforce → запись в БД
+func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
+	// Один вызов со сбросом — получаем дельту и обнуляем счётчики Xray
 	traffic, err := s.client.QueryAllUserTraffic(ctx, true)
 	if err != nil {
-		log.Printf("Stats collect error (reset): %v", err)
+		log.Printf("Stats collect error: %v", err)
 		return
 	}
 
-	// Объединяем с pending
+	// Объединяем с pending (незаписанные ранее дельты)
 	for email, stats := range s.pending {
 		entry := traffic[email]
 		entry[0] += stats[0]
@@ -104,76 +134,100 @@ func (s *StatsCollector) collect(ctx context.Context) {
 	}
 	clear(s.pending)
 
+	// Сохраняем дельту в snapshot для HTTP-хендлеров
+	s.snapMu.Lock()
+	s.lastTraffic = traffic
+	s.snapMu.Unlock()
+
 	updated := 0
-	for email, stats := range traffic {
+	for uuid, stats := range traffic {
 		up, down := stats[0], stats[1]
 		if up == 0 && down == 0 {
 			continue
 		}
 
-		if err := s.profiles.UpdateTraffic(ctx, email, up, down); err != nil {
-			log.Printf("Stats update error for %s: %v — will retry", email, err)
-			s.pending[email] = [2]int64{up, down}
+		delta := up + down
+
+		// 1. Обновляем кумулятивный счётчик в памяти
+		s.cumulativeMu.Lock()
+		s.cumulative[uuid] += delta
+		currentTotal := s.cumulative[uuid]
+		s.cumulativeMu.Unlock()
+
+		// 2. Проверяем лимит по памяти — без единого запроса к БД
+		s.limitsMu.RLock()
+		limit := s.limits[uuid]
+		s.limitsMu.RUnlock()
+
+		if limit > 0 && currentTotal >= limit {
+			s.disconnectUser(ctx, uuid, currentTotal, limit)
+		}
+
+		// 3. Пишем в БД
+		if err := s.profiles.UpdateTraffic(ctx, uuid, up, down); err != nil {
+			log.Printf("Stats update error for %s: %v — will retry", uuid, err)
+			s.pending[uuid] = [2]int64{up, down}
 			continue
 		}
 		updated++
-
-		// Сразу проверяем лимит после записи
-		s.checkAndEnforce(ctx, email)
 	}
 
 	if updated > 0 {
 		log.Printf("Stats collected: %d users updated", updated)
 	}
-	if len(s.pending) > 0 {
-		log.Printf("Stats pending: %d users will be retried next cycle", len(s.pending))
-	}
 
-	// Подстраховка: полная проверка раз в минуту (на случай expires_at)
+	// Подстраховка: полная проверка раз в минуту
 	if time.Since(s.lastFullEnforce) > time.Minute {
 		s.enforceAll(ctx)
 		s.lastFullEnforce = time.Now()
 	}
 }
 
-// checkAndEnforce — быстрая проверка одного профиля сразу после записи трафика
-func (s *StatsCollector) checkAndEnforce(ctx context.Context, uuid string) {
+// disconnectUser отключает пользователя из Xray и деактивирует в БД
+func (s *StatsCollector) disconnectUser(ctx context.Context, uuid string, total, limit int64) {
+	if err := s.client.RemoveUser(ctx, uuid); err != nil {
+		log.Printf("Enforce: failed to remove %s: %v", uuid, err)
+		return
+	}
+
+	// Для деактивации в БД нужен ID — получаем один раз
 	p, err := s.profiles.GetByUUID(ctx, uuid)
 	if err != nil {
-		return
-	}
-
-	if !p.IsActive {
-		return
-	}
-
-	total := p.TrafficUp + p.TrafficDown
-	expired := p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now())
-	overLimit := p.TrafficLimit > 0 && total >= p.TrafficLimit
-
-	if !expired && !overLimit {
-		return
-	}
-
-	if err := s.client.RemoveUser(ctx, p.UUID); err != nil {
-		log.Printf("Enforce: failed to remove %s from Xray: %v", p.UUID, err)
+		log.Printf("Enforce: profile %s not found: %v", uuid, err)
 		return
 	}
 
 	if err := s.profiles.SetActive(ctx, p.ID, false); err != nil {
-		log.Printf("Enforce: failed to deactivate %s in DB: %v", p.UUID, err)
+		log.Printf("Enforce: failed to deactivate %s: %v", uuid, err)
 		return
 	}
 
-	reason := "traffic limit"
-	if expired {
-		reason = "expired"
-	}
-	log.Printf("Enforce: %s (user_id=%d) disabled — %s (total: %d, limit: %d)",
-		p.UUID, p.UserID, reason, total, p.TrafficLimit)
+	overshoot := total - limit
+	log.Printf("Enforce: %s disabled — limit %d, total %d, overshoot %d (%.1f MB)",
+		uuid, limit, total, overshoot, float64(overshoot)/(1024*1024))
 }
 
-// enforceAll — полная проверка всех профилей (подстраховка, раз в минуту)
+// updateOnlineStatus — медленный цикл: онлайн-статус и IP-адреса
+func (s *StatsCollector) updateOnlineStatus(ctx context.Context) {
+	onlineUsers := make(map[string]bool)
+
+	s.snapMu.RLock()
+	liveTraffic := s.lastTraffic
+	s.snapMu.RUnlock()
+
+	if online, err := s.client.GetOnlineUsers(ctx, liveTraffic); err == nil {
+		onlineUsers = online
+	}
+
+	onlineIPs := s.client.GetOnlineIPs(ctx, onlineUsers)
+
+	s.snapMu.Lock()
+	s.lastOnline = onlineUsers
+	s.lastOnlineIPs = onlineIPs
+	s.snapMu.Unlock()
+}
+
+// enforceAll — полная проверка всех профилей (подстраховка для expires_at и рассинхрона)
 func (s *StatsCollector) enforceAll(ctx context.Context) {
 	exceeded, err := s.profiles.GetExceeded(ctx)
 	if err != nil {
@@ -201,4 +255,7 @@ func (s *StatsCollector) enforceAll(ctx context.Context) {
 	if len(exceeded) > 0 {
 		log.Printf("EnforceAll: %d profiles disabled", len(exceeded))
 	}
+
+	// Ресинхронизируем cumulative и limits из БД
+	s.InitCumulative(ctx)
 }
