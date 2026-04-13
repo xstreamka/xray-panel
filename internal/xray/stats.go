@@ -183,14 +183,18 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 	}
 }
 
-// disconnectUser отключает пользователя из Xray и деактивирует в БД
+// disconnectUser отключает пользователя: убивает TCP-сессии, удаляет из Xray, деактивирует в БД
 func (s *StatsCollector) disconnectUser(ctx context.Context, uuid string, total, limit int64) {
+	// 1. Сначала убиваем активные TCP-соединения (пока юзер ещё в Xray и IP доступны)
+	killed := s.client.KillConnections(ctx, uuid)
+
+	// 2. Удаляем из Xray (новые соединения больше не пройдут)
 	if err := s.client.RemoveUser(ctx, uuid); err != nil {
 		log.Printf("Enforce: failed to remove %s: %v", uuid, err)
 		return
 	}
 
-	// Для деактивации в БД нужен ID — получаем один раз
+	// 3. Деактивируем в БД
 	p, err := s.profiles.GetByUUID(ctx, uuid)
 	if err != nil {
 		log.Printf("Enforce: profile %s not found: %v", uuid, err)
@@ -203,8 +207,8 @@ func (s *StatsCollector) disconnectUser(ctx context.Context, uuid string, total,
 	}
 
 	overshoot := total - limit
-	log.Printf("Enforce: %s disabled — limit %d, total %d, overshoot %d (%.1f MB)",
-		uuid, limit, total, overshoot, float64(overshoot)/(1024*1024))
+	log.Printf("Enforce: %s disabled — limit %d, total %d, overshoot %.1f MB, killed %d connections",
+		uuid, limit, total, float64(overshoot)/(1024*1024), killed)
 }
 
 // updateOnlineStatus — медленный цикл: онлайн-статус и IP-адреса

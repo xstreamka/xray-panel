@@ -156,6 +156,7 @@ func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Admin: deactivate error: %v", err)
 		}
 		if client := h.xrayHolder.Get(); client != nil {
+			client.KillConnections(r.Context(), profile.UUID)
 			if err := client.RemoveUser(r.Context(), profile.UUID); err != nil {
 				log.Printf("Admin: xray remove error: %v", err)
 			}
