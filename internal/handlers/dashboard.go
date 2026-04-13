@@ -105,7 +105,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 			VPNProfile:   p,
 			VlessURI:     template.URL(h.buildVlessURI(p.UUID, p.Name)),
 			TrafficTotal: p.TrafficUp + p.TrafficDown,
-			IsOnline:     onlineUsers[p.UUID],
+			IsOnline:     p.IsActive && onlineUsers[p.UUID],
 			OnlineIPs:    onlineIPs[p.UUID],
 		}
 
@@ -248,7 +248,7 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			TrafficUpFmt:    formatBytesGo(p.TrafficUp),
 			TrafficDownFmt:  formatBytesGo(p.TrafficDown),
 			TrafficTotalFmt: formatBytesGo(total),
-			IsOnline:        onlineUsers[p.UUID],
+			IsOnline:        p.IsActive && onlineUsers[p.UUID],
 			OnlineIPs:       onlineIPs[p.UUID],
 			IsActive:        p.IsActive,
 			IsExpired:       isExpired,

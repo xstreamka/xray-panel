@@ -95,7 +95,7 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 	for _, p := range profiles {
 		pv := profileView{
 			VPNProfile: p,
-			IsOnline:   onlineUsers[p.UUID],
+			IsOnline:   p.IsActive && onlineUsers[p.UUID],
 			OnlineIPs:  onlineIPs[p.UUID],
 		}
 		profilesByUser[p.UserID] = append(profilesByUser[p.UserID], pv)
@@ -275,7 +275,7 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	for _, p := range profiles {
 		profilesByUser[p.UserID] = append(profilesByUser[p.UserID], profByUser{
 			VPNProfile: p,
-			IsOnline:   onlineUsers[p.UUID],
+			IsOnline:   p.IsActive && onlineUsers[p.UUID],
 			OnlineIPs:  onlineIPs[p.UUID],
 		})
 	}
