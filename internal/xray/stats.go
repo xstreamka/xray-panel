@@ -12,6 +12,9 @@ type StatsCollector struct {
 	client   *Client
 	profiles *models.VPNProfileStore
 	interval time.Duration
+	// pending хранит трафик, который не удалось записать в БД.
+	// Эти дельты добавляются к следующему циклу сбора, чтобы не терять трафик.
+	pending map[string][2]int64
 }
 
 func NewStatsCollector(client *Client, profiles *models.VPNProfileStore, interval time.Duration) *StatsCollector {
@@ -19,6 +22,7 @@ func NewStatsCollector(client *Client, profiles *models.VPNProfileStore, interva
 		client:   client,
 		profiles: profiles,
 		interval: interval,
+		pending:  make(map[string][2]int64),
 	}
 }
 
@@ -42,12 +46,22 @@ func (s *StatsCollector) Run(ctx context.Context) {
 
 func (s *StatsCollector) collect(ctx context.Context) {
 	// Атомарный запрос со сбросом — получаем дельту и сразу обнуляем счётчики Xray.
-	// Это исключает потерю трафика между отдельными шагами query и reset.
+	// Это исключает двойной подсчёт трафика (старая проблема "200 вместо 100").
 	traffic, err := s.client.QueryAllUserTraffic(ctx, true)
 	if err != nil {
 		log.Printf("Stats collect error: %v", err)
 		return
 	}
+
+	// Объединяем новые данные с pending (незаписанными ранее дельтами)
+	for email, stats := range s.pending {
+		entry := traffic[email]
+		entry[0] += stats[0]
+		entry[1] += stats[1]
+		traffic[email] = entry
+	}
+	// Очищаем pending — при ошибке запишем обратно
+	clear(s.pending)
 
 	updated := 0
 	for email, stats := range traffic {
@@ -57,7 +71,9 @@ func (s *StatsCollector) collect(ctx context.Context) {
 		}
 
 		if err := s.profiles.UpdateTraffic(ctx, email, up, down); err != nil {
-			log.Printf("Stats update error for %s: %v", email, err)
+			log.Printf("Stats update error for %s (up=%d, down=%d): %v — will retry", email, up, down, err)
+			// Сохраняем в pending для повторной попытки в следующем цикле
+			s.pending[email] = [2]int64{up, down}
 		} else {
 			updated++
 		}
@@ -65,6 +81,9 @@ func (s *StatsCollector) collect(ctx context.Context) {
 
 	if updated > 0 {
 		log.Printf("Stats collected: %d users updated", updated)
+	}
+	if len(s.pending) > 0 {
+		log.Printf("Stats pending: %d users will be retried next cycle", len(s.pending))
 	}
 }
 
