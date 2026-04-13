@@ -40,7 +40,9 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"statsUserUplink":   true,
 					"statsUserDownlink": true,
 					"statsUserOnline":   true,
-					"bufferSize":        4, // маленький буфер (4 KB) для частого обновления счётчиков трафика
+					"connIdle":          30, // закрывать idle-соединения через 30 сек (быстрее обновляет счётчики после splice)
+					"downlinkOnly":      3,  // после закрытия uplink ждать только 3 сек
+					"uplinkOnly":        1,  // после закрытия downlink ждать только 1 сек
 				},
 			},
 			"system": map[string]any{
