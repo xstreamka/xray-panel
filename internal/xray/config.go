@@ -40,6 +40,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"statsUserUplink":   true,
 					"statsUserDownlink": true,
 					"statsUserOnline":   true,
+					"bufferSize":        0, // отключаем внутреннюю буферизацию для мгновенного обновления счётчиков
 				},
 			},
 			"system": map[string]any{
