@@ -52,8 +52,7 @@ func (c *Client) Close() {
 // AddUser добавляет пользователя в Xray inbound (VLESS)
 func (c *Client) AddUser(ctx context.Context, uuid string, email string) error {
 	account := serial.ToTypedMessage(&vless.Account{
-		Id:   uuid,
-		Flow: "xtls-rprx-vision",
+		Id: uuid,
 	})
 
 	resp, err := c.handler.AlterInbound(ctx, &handlerService.AlterInboundRequest{

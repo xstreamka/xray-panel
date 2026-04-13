@@ -16,7 +16,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 		clients = append(clients, map[string]any{
 			"id":    uuid,
 			"email": uuid, // используем UUID как email для статистики
-			"flow":  "xtls-rprx-vision",
 		})
 	}
 
