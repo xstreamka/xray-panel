@@ -46,7 +46,7 @@
             {{if gt .OnlineCount 0}}
                 <span class="badge badge-green" data-stat="user-online">online ({{.OnlineCount}})</span>
             {{else}}
-                <span class="badge" style="background: #475569; color: #94a3b8;" data-stat="user-online">offline</span>
+                <span class="badge badge-gray" data-stat="user-online">offline</span>
             {{end}}
         </div>
         <div style="display: flex; gap: 1rem; align-items: center;">
@@ -74,9 +74,9 @@
                 {{if .IsActive}}
                     {{if .IsOnline}}
                         <span class="badge badge-green" data-stat="profile-status">● online</span>
-                        <span data-stat="profile-ips">{{range .OnlineIPs}}<span class="badge" style="background: #1e3a5f; color: #60a5fa;">{{.}}</span> {{end}}</span>
+                        <span data-stat="profile-ips">{{range .OnlineIPs}}<span class="badge badge-blue">{{.}}</span> {{end}}</span>
                     {{else}}
-                        <span class="badge" style="background: #1e3a5f; color: #60a5fa;" data-stat="profile-status">active</span>
+                        <span class="badge badge-blue" data-stat="profile-status">active</span>
                         <span data-stat="profile-ips"></span>
                     {{end}}
                 {{else}}
@@ -137,14 +137,13 @@ function refreshStats() {
                 // Обновляем онлайн-бейдж пользователя
                 const userOnline = card.querySelector('[data-stat="user-online"]');
                 if (userOnline) {
+                    userOnline.style.background = '';
+                    userOnline.style.color = '';
                     if (u.online_count > 0) {
                         userOnline.className = 'badge badge-green';
-                        userOnline.style = '';
                         userOnline.textContent = 'online (' + u.online_count + ')';
                     } else {
-                        userOnline.className = 'badge';
-                        userOnline.style.background = '#475569';
-                        userOnline.style.color = '#94a3b8';
+                        userOnline.className = 'badge badge-gray';
                         userOnline.textContent = 'offline';
                     }
                 }
@@ -163,16 +162,15 @@ function refreshStats() {
                     const traffic = row.querySelector('[data-stat="profile-traffic"]');
 
                     if (status) {
+                        status.style.background = '';
+                        status.style.color = '';
                         if (status.textContent.trim() === 'disabled') {
                             // Не меняем disabled-профили через AJAX
                         } else if (p.is_online) {
                             status.className = 'badge badge-green';
-                            status.style = '';
                             status.textContent = '● online';
                         } else {
-                            status.className = 'badge';
-                            status.style.background = '#1e3a5f';
-                            status.style.color = '#60a5fa';
+                            status.className = 'badge badge-blue';
                             status.textContent = 'active';
                         }
                     }
@@ -180,7 +178,7 @@ function refreshStats() {
                     if (ipsEl) {
                         const ips = p.online_ips || [];
                         if (p.is_online && ips.length > 0) {
-                            ipsEl.innerHTML = ips.map(ip => '<span class="badge" style="background:#1e3a5f;color:#60a5fa;">' + ip + '</span> ').join('');
+                            ipsEl.innerHTML = ips.map(ip => '<span class="badge badge-blue">' + ip + '</span> ').join('');
                         } else {
                             ipsEl.innerHTML = '';
                         }

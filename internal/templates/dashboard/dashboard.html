@@ -35,9 +35,9 @@
             {{if .IsActive}}
                 {{if .IsOnline}}
                     <span class="badge badge-green" data-stat="status">● online</span>
-                    <span data-stat="ips">{{range .OnlineIPs}}<span class="badge" style="background: #1e3a5f; color: #60a5fa;">{{.}}</span> {{end}}</span>
+                    <span data-stat="ips">{{range .OnlineIPs}}<span class="badge badge-blue">{{.}}</span> {{end}}</span>
                 {{else}}
-                    <span class="badge" style="background: #1e3a5f; color: #60a5fa;" data-stat="status">active</span>
+                    <span class="badge badge-blue" data-stat="status">active</span>
                     <span data-stat="ips"></span>
                 {{end}}
             {{else if .IsExpired}}
@@ -148,6 +148,8 @@ function refreshStats() {
                 const statusEl = card.querySelector('[data-stat="status"]');
                 const ipsEl = card.querySelector('[data-stat="ips"]');
                 if (statusEl) {
+                    statusEl.style.background = '';
+                    statusEl.style.color = '';
                     if (!s.is_active) {
                         if (s.is_expired) {
                             statusEl.className = 'badge badge-red';
@@ -163,9 +165,7 @@ function refreshStats() {
                         statusEl.className = 'badge badge-green';
                         statusEl.textContent = '● online';
                     } else {
-                        statusEl.className = 'badge';
-                        statusEl.style.background = '#1e3a5f';
-                        statusEl.style.color = '#60a5fa';
+                        statusEl.className = 'badge badge-blue';
                         statusEl.textContent = 'active';
                     }
                 }
@@ -174,7 +174,7 @@ function refreshStats() {
                 if (ipsEl) {
                     const ips = s.online_ips || [];
                     if (s.is_active && s.is_online && ips.length > 0) {
-                        ipsEl.innerHTML = ips.map(ip => '<span class="badge" style="background:#1e3a5f;color:#60a5fa;">' + ip + '</span> ').join('');
+                        ipsEl.innerHTML = ips.map(ip => '<span class="badge badge-blue">' + ip + '</span> ').join('');
                     } else {
                         ipsEl.innerHTML = '';
                     }
