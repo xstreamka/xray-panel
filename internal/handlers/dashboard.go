@@ -41,6 +41,52 @@ type profileView struct {
 	OnlineIPs     []string
 }
 
+// enrichProfiles добавляет live-трафик и онлайн-статус из snapshot или gRPC
+func (h *DashboardHandler) enrichProfiles(ctx context.Context, profiles []models.VPNProfile) (
+	enriched []models.VPNProfile,
+	onlineUsers map[string]bool,
+	onlineIPs map[string][]string,
+) {
+	enriched = profiles
+	onlineUsers = make(map[string]bool)
+
+	// Сначала пробуем snapshot (без gRPC-вызовов)
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		liveTraffic, online, ips := collector.Snapshot()
+		if liveTraffic != nil {
+			for i, p := range enriched {
+				if stats, ok := liveTraffic[p.UUID]; ok {
+					enriched[i].TrafficUp += stats[0]
+					enriched[i].TrafficDown += stats[1]
+				}
+			}
+			onlineUsers = online
+			onlineIPs = ips
+			return
+		}
+	}
+
+	// Fallback: прямой gRPC (если collector ещё не запустился)
+	if client := h.xrayHolder.Get(); client != nil {
+		var liveTraffic map[string][2]int64
+		if lt, err := client.QueryAllUserTraffic(ctx, false); err == nil {
+			liveTraffic = lt
+			for i, p := range enriched {
+				if stats, ok := liveTraffic[p.UUID]; ok {
+					enriched[i].TrafficUp += stats[0]
+					enriched[i].TrafficDown += stats[1]
+				}
+			}
+		}
+		if online, err := client.GetOnlineUsers(ctx, liveTraffic); err == nil {
+			onlineUsers = online
+		}
+		onlineIPs = client.GetOnlineIPs(ctx, onlineUsers)
+	}
+
+	return
+}
+
 func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
@@ -50,25 +96,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Подтягиваем свежую статистику, онлайн-статус и количество устройств из Xray
-	onlineUsers := make(map[string]bool)
-	var onlineIPs map[string][]string
-	if client := h.xrayHolder.Get(); client != nil {
-		var liveTraffic map[string][2]int64
-		if lt, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
-			liveTraffic = lt
-			for i, p := range profiles {
-				if stats, ok := liveTraffic[p.UUID]; ok {
-					profiles[i].TrafficUp += stats[0]
-					profiles[i].TrafficDown += stats[1]
-				}
-			}
-		}
-		if online, err := client.GetOnlineUsers(r.Context(), liveTraffic); err == nil {
-			onlineUsers = online
-		}
-		onlineIPs = client.GetOnlineIPs(r.Context(), onlineUsers)
-	}
+	profiles, onlineUsers, onlineIPs := h.enrichProfiles(r.Context(), profiles)
 
 	var views []profileView
 	for _, p := range profiles {
@@ -90,11 +118,11 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 
 			switch {
 			case pct >= 90:
-				v.ProgressColor = "#ef4444" // красный
+				v.ProgressColor = "#ef4444"
 			case pct >= 70:
-				v.ProgressColor = "#f59e0b" // жёлтый
+				v.ProgressColor = "#f59e0b"
 			default:
-				v.ProgressColor = "#22c55e" // зелёный
+				v.ProgressColor = "#22c55e"
 			}
 		}
 
@@ -144,7 +172,6 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Проверяем что профиль принадлежит юзеру
 	profiles, err := h.profiles.GetByUserID(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, "Internal error", http.StatusInternalServerError)
@@ -164,14 +191,12 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Удаляем из Xray
 	if client := h.xrayHolder.Get(); client != nil {
 		if err := client.RemoveUser(r.Context(), targetUUID); err != nil {
 			log.Printf("Warning: failed to remove user from Xray: %v", err)
 		}
 	}
 
-	// Удаляем из БД
 	if _, err := h.profiles.Delete(r.Context(), id); err != nil {
 		log.Printf("Delete profile error: %v", err)
 	}
@@ -206,24 +231,7 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	onlineUsers := make(map[string]bool)
-	var onlineIPs map[string][]string
-	if client := h.xrayHolder.Get(); client != nil {
-		var liveTraffic map[string][2]int64
-		if lt, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
-			liveTraffic = lt
-			for i, p := range profiles {
-				if stats, ok := liveTraffic[p.UUID]; ok {
-					profiles[i].TrafficUp += stats[0]
-					profiles[i].TrafficDown += stats[1]
-				}
-			}
-		}
-		if online, err := client.GetOnlineUsers(r.Context(), liveTraffic); err == nil {
-			onlineUsers = online
-		}
-		onlineIPs = client.GetOnlineIPs(r.Context(), onlineUsers)
-	}
+	profiles, onlineUsers, onlineIPs := h.enrichProfiles(r.Context(), profiles)
 
 	result := make([]profileStatsJSON, 0, len(profiles))
 	for _, p := range profiles {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -23,6 +24,52 @@ func NewAdminHandler(users *models.UserStore, profiles *models.VPNProfileStore, 
 	return &AdminHandler{users: users, profiles: profiles, xrayHolder: xrayHolder, renderer: renderer}
 }
 
+// enrichAllProfiles добавляет live-трафик и онлайн-статус ко всем профилям
+func (h *AdminHandler) enrichAllProfiles(ctx context.Context, profiles []models.VPNProfile) (
+	enriched []models.VPNProfile,
+	onlineUsers map[string]bool,
+	onlineIPs map[string][]string,
+) {
+	enriched = profiles
+	onlineUsers = make(map[string]bool)
+
+	// Сначала пробуем snapshot
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		liveTraffic, online, ips := collector.Snapshot()
+		if liveTraffic != nil {
+			for i, p := range enriched {
+				if stats, ok := liveTraffic[p.UUID]; ok {
+					enriched[i].TrafficUp += stats[0]
+					enriched[i].TrafficDown += stats[1]
+				}
+			}
+			onlineUsers = online
+			onlineIPs = ips
+			return
+		}
+	}
+
+	// Fallback: прямой gRPC
+	if client := h.xrayHolder.Get(); client != nil {
+		var liveTraffic map[string][2]int64
+		if lt, err := client.QueryAllUserTraffic(ctx, false); err == nil {
+			liveTraffic = lt
+			for i, p := range enriched {
+				if stats, ok := liveTraffic[p.UUID]; ok {
+					enriched[i].TrafficUp += stats[0]
+					enriched[i].TrafficDown += stats[1]
+				}
+			}
+		}
+		if online, err := client.GetOnlineUsers(ctx, liveTraffic); err == nil {
+			onlineUsers = online
+		}
+		onlineIPs = client.GetOnlineIPs(ctx, onlineUsers)
+	}
+
+	return
+}
+
 func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 	users, err := h.users.List(r.Context())
 	if err != nil {
@@ -36,17 +83,8 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем онлайн-статус и IP-адреса из Xray
-	onlineUsers := make(map[string]bool)
-	var onlineIPs map[string][]string
-	if client := h.xrayHolder.Get(); client != nil {
-		if online, err := client.GetOnlineUsers(r.Context(), nil); err == nil {
-			onlineUsers = online
-		}
-		onlineIPs = client.GetOnlineIPs(r.Context(), onlineUsers)
-	}
+	profiles, onlineUsers, onlineIPs := h.enrichAllProfiles(r.Context(), profiles)
 
-	// Группируем профили по user_id
 	type profileView struct {
 		models.VPNProfile
 		IsOnline  bool
@@ -93,7 +131,7 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	action := r.FormValue("action") // "activate" или "deactivate"
+	action := r.FormValue("action")
 
 	profile, err := h.profiles.GetByID(r.Context(), id)
 	if err != nil {
@@ -154,7 +192,6 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Admin: reset traffic error: %v", err)
 	}
 
-	// Если профиль был деактивирован из-за лимита — включаем обратно
 	if !profile.IsActive {
 		h.profiles.SetActive(r.Context(), id, true)
 		if client := h.xrayHolder.Get(); client != nil {
@@ -194,24 +231,7 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	onlineUsers := make(map[string]bool)
-	var onlineIPs map[string][]string
-	if client := h.xrayHolder.Get(); client != nil {
-		var liveTraffic map[string][2]int64
-		if lt, err := client.QueryAllUserTraffic(r.Context(), false); err == nil {
-			liveTraffic = lt
-			for i, p := range profiles {
-				if stats, ok := liveTraffic[p.UUID]; ok {
-					profiles[i].TrafficUp += stats[0]
-					profiles[i].TrafficDown += stats[1]
-				}
-			}
-		}
-		if online, err := client.GetOnlineUsers(r.Context(), liveTraffic); err == nil {
-			onlineUsers = online
-		}
-		onlineIPs = client.GetOnlineIPs(r.Context(), onlineUsers)
-	}
+	profiles, onlineUsers, onlineIPs := h.enrichAllProfiles(r.Context(), profiles)
 
 	type profByUser struct {
 		models.VPNProfile

@@ -18,6 +18,8 @@ type contextKey string
 
 const userContextKey contextKey = "user"
 
+const maxSessionAge = 30 * 24 * time.Hour // 30 дней
+
 type AuthMiddleware struct {
 	userStore *models.UserStore
 	secretKey string
@@ -93,6 +95,16 @@ func (m *AuthMiddleware) getUserFromCookie(r *http.Request) (*models.User, error
 
 	if !m.verify(value, sig) {
 		return nil, fmt.Errorf("invalid signature")
+	}
+
+	// Проверка возраста сессии
+	ts, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid timestamp")
+	}
+	age := time.Since(time.Unix(ts, 0))
+	if age > maxSessionAge || age < 0 {
+		return nil, fmt.Errorf("session expired")
 	}
 
 	userID, err := strconv.Atoi(parts[0])

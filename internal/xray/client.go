@@ -53,6 +53,7 @@ func (c *Client) Close() {
 func (c *Client) AddUser(ctx context.Context, uuid string, email string) error {
 	account := serial.ToTypedMessage(&vless.Account{
 		Id: uuid,
+		// Flow убран — без splice трафик считается в реальном времени
 	})
 
 	resp, err := c.handler.AlterInbound(ctx, &handlerService.AlterInboundRequest{
@@ -90,14 +91,12 @@ func (c *Client) RemoveUser(ctx context.Context, email string) error {
 }
 
 // GetUserTraffic получает статистику трафика пользователя
-// Xray хранит стату по email: user>>>email>>>traffic>>>uplink / downlink
 func (c *Client) GetUserTraffic(ctx context.Context, email string, reset bool) (up, down int64, err error) {
 	upResp, err := c.stats.GetStats(ctx, &statsService.GetStatsRequest{
 		Name:   fmt.Sprintf("user>>>%s>>>traffic>>>uplink", email),
 		Reset_: reset,
 	})
 	if err != nil {
-		// Если стата ещё не появилась — не ошибка
 		up = 0
 	} else {
 		up = upResp.GetStat().GetValue()
@@ -117,16 +116,12 @@ func (c *Client) GetUserTraffic(ctx context.Context, email string, reset bool) (
 }
 
 // GetOnlineUsers возвращает множество email-ов онлайн-пользователей.
-// Сначала пробует GetAllOnlineUsers API (Xray online tracking).
-// Если API недоступен или возвращает пустой результат — определяет по наличию
-// ненулевого трафика (можно передать уже полученный traffic, чтобы не дёргать API дважды).
 func (c *Client) GetOnlineUsers(ctx context.Context, liveTraffic map[string][2]int64) (map[string]bool, error) {
 	// 1. Пробуем native online tracking API
 	resp, err := c.stats.GetAllOnlineUsers(ctx, &statsService.GetAllOnlineUsersRequest{})
 	if err == nil && len(resp.GetUsers()) > 0 {
 		online := make(map[string]bool, len(resp.GetUsers()))
 		for _, raw := range resp.GetUsers() {
-			// API возвращает "user>>>email>>>online" — извлекаем email
 			email := raw
 			if parts := strings.SplitN(raw, ">>>", 3); len(parts) >= 2 {
 				email = parts[1]
@@ -136,7 +131,7 @@ func (c *Client) GetOnlineUsers(ctx context.Context, liveTraffic map[string][2]i
 		return online, nil
 	}
 
-	// 2. Fallback: определяем по ненулевому трафику в текущем интервале
+	// 2. Fallback: определяем по ненулевому трафику
 	if liveTraffic == nil {
 		liveTraffic, err = c.QueryAllUserTraffic(ctx, false)
 		if err != nil {
@@ -153,7 +148,6 @@ func (c *Client) GetOnlineUsers(ctx context.Context, liveTraffic map[string][2]i
 }
 
 // GetOnlineIPs возвращает списки подключённых IP для каждого онлайн-пользователя.
-// Использует GetStatsOnlineIpList API. Если API недоступен — возвращает пустые списки.
 func (c *Client) GetOnlineIPs(ctx context.Context, onlineUsers map[string]bool) map[string][]string {
 	result := make(map[string][]string, len(onlineUsers))
 	for email := range onlineUsers {
@@ -182,10 +176,8 @@ func (c *Client) QueryAllUserTraffic(ctx context.Context, reset bool) (map[strin
 		return nil, fmt.Errorf("query stats: %w", err)
 	}
 
-	// Парсим: user>>>email>>>traffic>>>uplink|downlink
 	result := make(map[string][2]int64)
 	for _, stat := range resp.GetStat() {
-		// stat.Name = "user>>>uuid>>>traffic>>>uplink" или "...>>>downlink"
 		parts := strings.Split(stat.GetName(), ">>>")
 		if len(parts) != 4 {
 			continue

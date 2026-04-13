@@ -85,6 +85,9 @@ func main() {
 	dashHandler := handlers.NewDashboardHandler(profileStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, xrayHolder, renderer)
 
+	// Rate limiter: 5 попыток в минуту на IP
+	loginLimiter := middleware.NewRateLimiter(5, time.Minute)
+
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
@@ -97,9 +100,9 @@ func main() {
 		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 	})
 	r.Get("/login", authHandler.LoginPage)
-	r.Post("/login", authHandler.Login)
+	r.With(loginLimiter.Middleware).Post("/login", authHandler.Login)
 	r.Get("/register", authHandler.RegisterPage)
-	r.Post("/register", authHandler.Register)
+	r.With(loginLimiter.Middleware).Post("/register", authHandler.Register)
 	r.Get("/logout", authHandler.Logout)
 
 	r.Group(func(r chi.Router) {
@@ -162,6 +165,7 @@ func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, p
 		syncUsersToXray(ctx, client, profiles)
 
 		collector := xray.NewStatsCollector(client, profiles, 3*time.Second)
+		holder.SetCollector(collector)
 		collector.Run(ctx)
 		return
 	}
@@ -169,7 +173,6 @@ func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, p
 }
 
 func syncUsersToXray(ctx context.Context, client *xray.Client, profiles *models.VPNProfileStore) {
-	// Удаляем неактивных пользователей из Xray (могли остаться из старого конфига)
 	inactiveUUIDs, err := profiles.GetAllInactiveUUIDs(ctx)
 	if err != nil {
 		log.Printf("Sync: failed to get inactive UUIDs: %v", err)
@@ -185,7 +188,6 @@ func syncUsersToXray(ctx context.Context, client *xray.Client, profiles *models.
 		}
 	}
 
-	// Добавляем активных пользователей
 	uuids, err := profiles.GetAllActiveUUIDs(ctx)
 	if err != nil {
 		log.Printf("Sync: failed to get active UUIDs: %v", err)

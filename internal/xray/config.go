@@ -16,6 +16,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 		clients = append(clients, map[string]any{
 			"id":    uuid,
 			"email": uuid, // используем UUID как email для статистики
+			// flow убран — без splice трафик считается в реальном времени
 		})
 	}
 
@@ -39,9 +40,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"statsUserUplink":   true,
 					"statsUserDownlink": true,
 					"statsUserOnline":   true,
-					"connIdle":          30, // закрывать idle-соединения через 30 сек (быстрее обновляет счётчики после splice)
-					"downlinkOnly":      3,  // после закрытия uplink ждать только 3 сек
-					"uplinkOnly":        1,  // после закрытия downlink ждать только 1 сек
 				},
 			},
 			"system": map[string]any{
@@ -108,7 +106,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 								{
 									"id":         cfg.AmsterdamUUID,
 									"encryption": "none",
-									"flow":       "xtls-rprx-vision",
+									// flow убран на outbound тоже
 								},
 							},
 						},
