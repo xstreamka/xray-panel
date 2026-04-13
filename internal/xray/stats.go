@@ -185,13 +185,17 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 
 // disconnectUser отключает пользователя: убивает TCP-сессии, удаляет из Xray, деактивирует в БД
 func (s *StatsCollector) disconnectUser(ctx context.Context, uuid string, total, limit int64) {
-	// 1. Сначала убиваем активные TCP-соединения (пока юзер ещё в Xray и IP доступны)
+	// Сразу обнуляем лимит в кэше, чтобы следующие циклы не спамили повторными попытками
+	s.limitsMu.Lock()
+	s.limits[uuid] = 0
+	s.limitsMu.Unlock()
+
+	// 1. Убиваем активные TCP-соединения (пока юзер ещё в Xray и IP доступны)
 	killed := s.client.KillConnections(ctx, uuid)
 
-	// 2. Удаляем из Xray (новые соединения больше не пройдут)
+	// 2. Удаляем из Xray (ошибка "not found" — не страшно, мог быть удалён ранее)
 	if err := s.client.RemoveUser(ctx, uuid); err != nil {
-		log.Printf("Enforce: failed to remove %s: %v", uuid, err)
-		return
+		log.Printf("Enforce: RemoveUser %s: %v (may be already removed)", uuid, err)
 	}
 
 	// 3. Деактивируем в БД

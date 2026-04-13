@@ -35,6 +35,8 @@ services:
       db:
         condition: service_healthy
     network_mode: host
+    cap_add:
+      - NET_ADMIN
     environment:
       LISTEN_ADDR: ":${LISTEN_PORT:-8080}"
       SECRET_KEY: ${SECRET_KEY:-change-me-to-random-string-32ch}
