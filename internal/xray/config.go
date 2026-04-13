@@ -15,12 +15,40 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 	for _, uuid := range activeUUIDs {
 		clients = append(clients, map[string]any{
 			"id":    uuid,
-			"email": uuid, // используем UUID как email для статистики
+			"email": uuid,
 		})
 	}
 
 	xrayConfig := map[string]any{
-		// API для gRPC управления
+		// Логирование — видим какой outbound выбран для каждого запроса
+		"log": map[string]any{
+			"loglevel": "warning",
+			"access":   "/var/log/xray/access.log",
+			"error":    "/var/log/xray/error.log",
+		},
+
+		// DNS — Xray резолвит домены сам для routing
+		// Без этой секции IPIfNonMatch не работает!
+		"dns": map[string]any{
+			"servers": []any{
+				// РФ домены через Яндекс DNS
+				map[string]any{
+					"address": "77.88.8.8",
+					"port":    53,
+					"domains": []string{
+						"geosite:category-ru",
+						"domain:ru",
+						"domain:su",
+						"domain:xn--p1ai",
+					},
+				},
+				// Остальное
+				"8.8.8.8",
+				"1.1.1.1",
+			},
+		},
+
+		// API
 		"api": map[string]any{
 			"tag": "api",
 			"services": []string{
@@ -29,10 +57,8 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 			},
 		},
 
-		// Статистика
 		"stats": map[string]any{},
 
-		// Policy — включаем статистику для пользователей
 		"policy": map[string]any{
 			"levels": map[string]any{
 				"0": map[string]any{
@@ -51,7 +77,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 
 		// Inbounds
 		"inbounds": []map[string]any{
-			// API inbound (только локальный)
 			{
 				"tag":      "api-in",
 				"listen":   "127.0.0.1",
@@ -61,7 +86,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"address": "127.0.0.1",
 				},
 			},
-			// VLESS Reality inbound (для пользователей)
 			{
 				"tag":      cfg.XrayInboundTag,
 				"listen":   "0.0.0.0",
@@ -86,14 +110,14 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 				"sniffing": map[string]any{
 					"enabled":      true,
 					"destOverride": []string{"http", "tls", "quic"},
-					"routeOnly":    false,
+					"routeOnly":    true, // только для роутинга, не трогаем destination
 				},
 			},
 		},
 
 		// Outbounds
 		"outbounds": []map[string]any{
-			// Основной outbound — на Амстердам через Xray
+			// Амстердам — default (первый)
 			{
 				"tag":      "proxy-out",
 				"protocol": "vless",
@@ -122,15 +146,15 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					},
 				},
 			},
-			// Direct — выход напрямую с ЯО (для РФ трафика и API)
+			// Direct — выход с ЯО
 			{
 				"tag":      "direct",
 				"protocol": "freedom",
 				"settings": map[string]any{
-					"domainStrategy": "UseIPv4", // предпочитаем IPv4 для РФ ресурсов
+					"domainStrategy": "UseIPv4",
 				},
 			},
-			// Block — для рекламы/телеметрии (опционально)
+			// Block
 			{
 				"tag":      "block",
 				"protocol": "blackhole",
@@ -142,48 +166,55 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 			},
 		},
 
-		// Routing — сплит: РФ напрямую, остальное через Амстердам
+		// Routing
 		"routing": map[string]any{
-			"domainStrategy": "IPIfNonMatch", // если домен не матчится — резолвим IP и проверяем geoip
+			"domainStrategy": "IPIfNonMatch",
+			"domainMatcher":  "hybrid",
 			"rules": []map[string]any{
-				// 1. API трафик → direct
+				// 1. API
 				{
 					"type":        "field",
 					"inboundTag":  []string{"api-in"},
 					"outboundTag": "api",
 				},
-				// 2. Блокируем рекламу/трекеры (опционально, можно убрать)
+				// 2. Реклама → block
 				{
 					"type":        "field",
 					"domain":      []string{"geosite:category-ads-all"},
 					"outboundTag": "block",
 				},
-				// 3. Российские домены → direct (выход с ЯО)
+				// 3. РФ домены → direct
 				{
 					"type": "field",
 					"domain": []string{
-						"geosite:category-ru", // агрегированная категория РФ сайтов
-						"domain:ru",           // все .ru домены
-						"domain:su",           // .su домены
-						"domain:xn--p1ai",     // .рф (punycode)
-						"domain:yandex.com",   // Яндекс международный
-						"domain:vk.com",       // VK
-						"domain:mail.ru",      // Mail.ru
-						"domain:ok.ru",        // Одноклассники
-						"domain:sberbank.ru",  // Сбер
-						"domain:tinkoff.ru",   // Тинькофф
-						"domain:gosuslugi.ru", // Госуслуги
-						"domain:nalog.gov.ru", // ФНС
+						"geosite:category-ru",
+						"domain:ru",
+						"domain:su",
+						"domain:xn--p1ai",
+						"domain:yandex.com",
+						"domain:yandex.net",
+						"domain:yastatic.net",
+						"domain:vk.com",
+						"domain:vkontakte.ru",
+						"domain:vk.me",
+						"domain:mail.ru",
+						"domain:ok.ru",
+						"domain:sberbank.ru",
+						"domain:sber.ru",
+						"domain:tinkoff.ru",
+						"domain:gosuslugi.ru",
+						"domain:nalog.gov.ru",
+						"domain:mos.ru",
 					},
 					"outboundTag": "direct",
 				},
-				// 4. Российские IP → direct (выход с ЯО)
+				// 4. РФ IP → direct (подстраховка через IPIfNonMatch)
 				{
 					"type":        "field",
 					"ip":          []string{"geoip:ru"},
 					"outboundTag": "direct",
 				},
-				// 5. Приватные сети → direct
+				// 5. Приватные сети
 				{
 					"type":        "field",
 					"ip":          []string{"geoip:private"},
@@ -203,6 +234,9 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
+
+	// Создаём директорию для логов (не критично если не получится)
+	os.MkdirAll("/var/log/xray", 0755)
 
 	if err := os.WriteFile(outputPath, data, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)

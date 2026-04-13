@@ -26,6 +26,7 @@ services:
         condition: service_started
     volumes:
       - xray-config:/etc/xray
+      - xray-logs:/var/log/xray
     command: ["run", "-c", "/etc/xray/config.json"]
 
   panel:
@@ -63,7 +64,9 @@ services:
       AMSTERDAM_SHORT_ID: ${AMSTERDAM_SHORT_ID}
     volumes:
       - xray-config:/etc/xray
+      - xray-logs:/var/log/xray
 
 volumes:
   pgdata:
   xray-config:
+  xray-logs:
