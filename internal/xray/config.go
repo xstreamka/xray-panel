@@ -189,7 +189,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 						"domain:gosuslugi.ru",
 						"domain:nalog.gov.ru",
 						"domain:mos.ru",
-						"domain:zvuk.com",
 					},
 					"outboundTag": "direct",
 				},
