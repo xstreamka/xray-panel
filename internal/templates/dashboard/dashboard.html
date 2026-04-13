@@ -144,11 +144,22 @@ function refreshStats() {
                     if (s.progress_color) bar.style.background = s.progress_color;
                 }
 
-                // Обновляем онлайн-статус и IP-адреса
+                // Обновляем статус блокировки и онлайн-статус
                 const statusEl = card.querySelector('[data-stat="status"]');
                 const ipsEl = card.querySelector('[data-stat="ips"]');
                 if (statusEl) {
-                    if (s.is_online) {
+                    if (!s.is_active) {
+                        if (s.is_expired) {
+                            statusEl.className = 'badge badge-red';
+                            statusEl.textContent = 'expired';
+                        } else if (s.is_over_limit) {
+                            statusEl.className = 'badge badge-red';
+                            statusEl.textContent = 'лимит';
+                        } else {
+                            statusEl.className = 'badge badge-red';
+                            statusEl.textContent = 'disabled';
+                        }
+                    } else if (s.is_online) {
                         statusEl.className = 'badge badge-green';
                         statusEl.textContent = '● online';
                     } else {
@@ -158,9 +169,11 @@ function refreshStats() {
                         statusEl.textContent = 'active';
                     }
                 }
+                // Обновляем прозрачность карточки
+                card.style.opacity = s.is_active ? '' : '0.6';
                 if (ipsEl) {
                     const ips = s.online_ips || [];
-                    if (s.is_online && ips.length > 0) {
+                    if (s.is_active && s.is_online && ips.length > 0) {
                         ipsEl.innerHTML = ips.map(ip => '<span class="badge" style="background:#1e3a5f;color:#60a5fa;">' + ip + '</span> ').join('');
                     } else {
                         ipsEl.innerHTML = '';

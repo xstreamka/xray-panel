@@ -192,6 +192,9 @@ type profileStatsJSON struct {
 	LimitFmt        string   `json:"limit_fmt,omitzero"`
 	IsOnline        bool     `json:"is_online"`
 	OnlineIPs       []string `json:"online_ips"`
+	IsActive        bool     `json:"is_active"`
+	IsExpired       bool     `json:"is_expired"`
+	IsOverLimit     bool     `json:"is_over_limit"`
 }
 
 func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +228,9 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	result := make([]profileStatsJSON, 0, len(profiles))
 	for _, p := range profiles {
 		total := p.TrafficUp + p.TrafficDown
+		isExpired := p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now())
+		isOverLimit := p.TrafficLimit > 0 && total >= p.TrafficLimit
+
 		s := profileStatsJSON{
 			ID:              p.ID,
 			TrafficUp:       p.TrafficUp,
@@ -235,6 +241,9 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			TrafficTotalFmt: formatBytesGo(total),
 			IsOnline:        onlineUsers[p.UUID],
 			OnlineIPs:       onlineIPs[p.UUID],
+			IsActive:        p.IsActive,
+			IsExpired:       isExpired,
+			IsOverLimit:     isOverLimit,
 		}
 
 		if p.TrafficLimit > 0 {
