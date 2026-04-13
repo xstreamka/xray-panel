@@ -16,7 +16,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 		clients = append(clients, map[string]any{
 			"id":    uuid,
 			"email": uuid, // используем UUID как email для статистики
-			// flow убран — без splice трафик считается в реальном времени
 		})
 	}
 
@@ -86,7 +85,8 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 				},
 				"sniffing": map[string]any{
 					"enabled":      true,
-					"destOverride": []string{"http", "tls"},
+					"destOverride": []string{"http", "tls", "quic"},
+					"routeOnly":    false,
 				},
 			},
 		},
@@ -106,7 +106,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 								{
 									"id":         cfg.AmsterdamUUID,
 									"encryption": "none",
-									// flow убран на outbound тоже
 								},
 							},
 						},
@@ -123,23 +122,74 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					},
 				},
 			},
-			// Freedom для API
+			// Direct — выход напрямую с ЯО (для РФ трафика и API)
 			{
 				"tag":      "direct",
 				"protocol": "freedom",
+				"settings": map[string]any{
+					"domainStrategy": "UseIPv4", // предпочитаем IPv4 для РФ ресурсов
+				},
+			},
+			// Block — для рекламы/телеметрии (опционально)
+			{
+				"tag":      "block",
+				"protocol": "blackhole",
+				"settings": map[string]any{
+					"response": map[string]any{
+						"type": "http",
+					},
+				},
 			},
 		},
 
-		// Routing
+		// Routing — сплит: РФ напрямую, остальное через Амстердам
 		"routing": map[string]any{
+			"domainStrategy": "IPIfNonMatch", // если домен не матчится — резолвим IP и проверяем geoip
 			"rules": []map[string]any{
-				// API трафик → на API outbound
+				// 1. API трафик → direct
 				{
 					"type":        "field",
 					"inboundTag":  []string{"api-in"},
 					"outboundTag": "api",
 				},
-				// Весь пользовательский трафик → Амстердам
+				// 2. Блокируем рекламу/трекеры (опционально, можно убрать)
+				{
+					"type":        "field",
+					"domain":      []string{"geosite:category-ads-all"},
+					"outboundTag": "block",
+				},
+				// 3. Российские домены → direct (выход с ЯО)
+				{
+					"type": "field",
+					"domain": []string{
+						"geosite:category-ru", // агрегированная категория РФ сайтов
+						"domain:ru",           // все .ru домены
+						"domain:su",           // .su домены
+						"domain:xn--p1ai",     // .рф (punycode)
+						"domain:yandex.com",   // Яндекс международный
+						"domain:vk.com",       // VK
+						"domain:mail.ru",      // Mail.ru
+						"domain:ok.ru",        // Одноклассники
+						"domain:sberbank.ru",  // Сбер
+						"domain:tinkoff.ru",   // Тинькофф
+						"domain:gosuslugi.ru", // Госуслуги
+						"domain:nalog.gov.ru", // ФНС
+					},
+					"outboundTag": "direct",
+				},
+				// 4. Российские IP → direct (выход с ЯО)
+				{
+					"type":        "field",
+					"ip":          []string{"geoip:ru"},
+					"outboundTag": "direct",
+				},
+				// 5. Приватные сети → direct
+				{
+					"type":        "field",
+					"ip":          []string{"geoip:private"},
+					"outboundTag": "direct",
+				},
+				// 6. Всё остальное → Амстердам
 				{
 					"type":        "field",
 					"inboundTag":  []string{cfg.XrayInboundTag},
