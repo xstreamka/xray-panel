@@ -28,8 +28,11 @@ xray-logs:
 	docker compose logs -f xray
 
 xray-access:
-	docker compose exec xray tail -f /var/log/xray/access.log
+	docker compose exec panel tail -f /var/log/xray/access.log
+
+xray-error:
+	docker compose exec panel tail -f /var/log/xray/error.log
 
 # Проверить сгенерированный конфиг
 xray-config:
-	docker compose exec xray cat /etc/xray/config.json | python3 -m json.tool 2>/dev/null || docker compose exec xray cat /etc/xray/config.json
+	docker compose exec panel cat /etc/xray/config.json
