@@ -99,6 +99,7 @@ func main() {
 	loginLimiter := middleware.NewRateLimiter(5, time.Minute)
 
 	r := chi.NewRouter()
+	r.Use(chimw.RealIP)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Compress(5))
