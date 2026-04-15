@@ -101,7 +101,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"realitySettings": map[string]any{
 						"show":        false,
 						"dest":        cfg.RealityDest,
-						"xver":        0,
+						"xver":        2,
 						"serverNames": cfg.RealityServerNames,
 						"privateKey":  cfg.RealityPrivateKey,
 						"shortIds":    []string{cfg.RealityShortID},
