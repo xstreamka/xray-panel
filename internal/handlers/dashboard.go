@@ -21,13 +21,14 @@ import (
 
 type DashboardHandler struct {
 	profiles   *models.VPNProfileStore
+	users      *models.UserStore
 	xrayHolder *xray.Holder
 	cfg        *config.Config
 	renderer   *Renderer
 }
 
-func NewDashboardHandler(profiles *models.VPNProfileStore, xrayHolder *xray.Holder, cfg *config.Config, renderer *Renderer) *DashboardHandler {
-	return &DashboardHandler{profiles: profiles, xrayHolder: xrayHolder, cfg: cfg, renderer: renderer}
+func NewDashboardHandler(profiles *models.VPNProfileStore, users *models.UserStore, xrayHolder *xray.Holder, cfg *config.Config, renderer *Renderer) *DashboardHandler {
+	return &DashboardHandler{profiles: profiles, users: users, xrayHolder: xrayHolder, cfg: cfg, renderer: renderer}
 }
 
 type profileView struct {
@@ -40,6 +41,7 @@ type profileView struct {
 	IsOverLimit   bool
 	IsOnline      bool
 	OnlineIPs     []string
+	Remaining     int64 // остаток лимита в байтах
 }
 
 // enrichProfiles добавляет live-трафик и онлайн-статус из snapshot или gRPC
@@ -51,7 +53,6 @@ func (h *DashboardHandler) enrichProfiles(ctx context.Context, profiles []models
 	enriched = profiles
 	onlineUsers = make(map[string]bool)
 
-	// Сначала пробуем snapshot (без gRPC-вызовов)
 	if collector := h.xrayHolder.GetCollector(); collector != nil {
 		liveTraffic, online, ips := collector.Snapshot()
 		if liveTraffic != nil {
@@ -67,7 +68,6 @@ func (h *DashboardHandler) enrichProfiles(ctx context.Context, profiles []models
 		}
 	}
 
-	// Fallback: прямой gRPC (если collector ещё не запустился)
 	if client := h.xrayHolder.Get(); client != nil {
 		var liveTraffic map[string][2]int64
 		if lt, err := client.QueryAllUserTraffic(ctx, false); err == nil {
@@ -110,12 +110,18 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if p.TrafficLimit > 0 {
-			pct := int(float64(v.TrafficTotal) / float64(p.TrafficLimit) * 100)
+			used := v.TrafficTotal
+			v.Remaining = p.TrafficLimit - used
+			if v.Remaining < 0 {
+				v.Remaining = 0
+			}
+
+			pct := int(float64(used) / float64(p.TrafficLimit) * 100)
 			if pct > 100 {
 				pct = 100
 			}
 			v.UsagePercent = pct
-			v.IsOverLimit = v.TrafficTotal >= p.TrafficLimit
+			v.IsOverLimit = used >= p.TrafficLimit
 
 			switch {
 			case pct >= 90:
@@ -134,6 +140,12 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		views = append(views, v)
 	}
 
+	// Пересчитываем баланс (user может быть stale из cookie)
+	freshUser, _ := h.users.GetByID(r.Context(), user.ID)
+	if freshUser != nil {
+		user = freshUser
+	}
+
 	h.renderer.Render(w, "dashboard.html", map[string]any{
 		"User":     user,
 		"Profiles": views,
@@ -147,18 +159,47 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 		name = "default"
 	}
 
+	// Парсим кол-во ГБ для профиля
+	limitGBStr := r.FormValue("limit_gb")
+	limitGB, err := strconv.ParseFloat(limitGBStr, 64)
+	if err != nil || limitGB <= 0 {
+		http.Error(w, "Укажите количество ГБ для профиля (> 0)", http.StatusBadRequest)
+		return
+	}
+
+	limitBytes := int64(limitGB * 1024 * 1024 * 1024)
+
+	// Списываем с баланса
+	if err := h.users.DeductBalance(r.Context(), user.ID, limitBytes); err != nil {
+		log.Printf("Deduct balance failed for user %d: %v", user.ID, err)
+		http.Error(w, "Недостаточно трафика на балансе. Пополните баланс.", http.StatusBadRequest)
+		return
+	}
+
 	newUUID := uuid.New().String()
 
-	_, err := h.profiles.Create(r.Context(), user.ID, newUUID, name)
+	profile, err := h.profiles.Create(r.Context(), user.ID, newUUID, name)
 	if err != nil {
+		// Возвращаем баланс
+		h.users.RefundBalance(r.Context(), user.ID, limitBytes)
 		http.Error(w, "Ошибка создания профиля: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	// Устанавливаем лимит
+	if err := h.profiles.SetLimit(r.Context(), profile.ID, limitBytes); err != nil {
+		log.Printf("Warning: failed to set limit for profile %d: %v", profile.ID, err)
 	}
 
 	if client := h.xrayHolder.Get(); client != nil {
 		if err := client.AddUser(r.Context(), newUUID, newUUID); err != nil {
 			log.Printf("Warning: failed to add user to Xray: %v", err)
 		}
+	}
+
+	// Обновляем лимит в collector
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.UpdateLimit(newUUID, limitBytes)
 	}
 
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
@@ -179,21 +220,32 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var targetUUID string
+	var target *models.VPNProfile
 	for _, p := range profiles {
 		if p.ID == id {
-			targetUUID = p.UUID
+			target = &p
 			break
 		}
 	}
 
-	if targetUUID == "" {
+	if target == nil {
 		http.Error(w, "Профиль не найден", http.StatusNotFound)
 		return
 	}
 
+	// Возвращаем неиспользованный трафик на баланс
+	used := target.TrafficUp + target.TrafficDown
+	if target.TrafficLimit > 0 && used < target.TrafficLimit {
+		refund := target.TrafficLimit - used
+		if err := h.users.RefundBalance(r.Context(), user.ID, refund); err != nil {
+			log.Printf("Warning: failed to refund balance for user %d: %v", user.ID, err)
+		} else {
+			log.Printf("Refunded %d bytes to user %d (profile %s)", refund, user.ID, target.UUID)
+		}
+	}
+
 	if client := h.xrayHolder.Get(); client != nil {
-		if err := client.RemoveUser(r.Context(), targetUUID); err != nil {
+		if err := client.RemoveUser(r.Context(), target.UUID); err != nil {
 			log.Printf("Warning: failed to remove user from Xray: %v", err)
 		}
 	}
@@ -223,6 +275,12 @@ type profileStatsJSON struct {
 	IsOverLimit     bool     `json:"is_over_limit"`
 }
 
+type dashStatsJSON struct {
+	Balance    int64              `json:"balance"`
+	BalanceFmt string             `json:"balance_fmt"`
+	Profiles   []profileStatsJSON `json:"profiles"`
+}
+
 func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
@@ -234,7 +292,10 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 
 	profiles, onlineUsers, onlineIPs := h.enrichProfiles(r.Context(), profiles)
 
-	result := make([]profileStatsJSON, 0, len(profiles))
+	// Получаем актуальный баланс
+	balance, _ := h.users.GetBalance(r.Context(), user.ID)
+
+	profileStats := make([]profileStatsJSON, 0, len(profiles))
 	for _, p := range profiles {
 		total := p.TrafficUp + p.TrafficDown
 		isExpired := p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now())
@@ -273,7 +334,13 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		result = append(result, s)
+		profileStats = append(profileStats, s)
+	}
+
+	result := dashStatsJSON{
+		Balance:    balance,
+		BalanceFmt: formatBytesGo(balance),
+		Profiles:   profileStats,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

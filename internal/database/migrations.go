@@ -14,6 +14,10 @@ var migrations = []string{
 		password_hash VARCHAR(255) NOT NULL,
 		is_admin      BOOLEAN DEFAULT FALSE,
 		is_active     BOOLEAN DEFAULT TRUE,
+		email_verified BOOLEAN DEFAULT FALSE,
+		verify_token  VARCHAR(64),
+		verify_expires TIMESTAMPTZ,
+		traffic_balance BIGINT DEFAULT 0,
 		created_at    TIMESTAMPTZ DEFAULT NOW(),
 		updated_at    TIMESTAMPTZ DEFAULT NOW()
 	)`,
@@ -45,6 +49,39 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_traffic_logs_logged_at ON traffic_logs(logged_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_vpn_profiles_user_id ON vpn_profiles(user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_vpn_profiles_uuid ON vpn_profiles(uuid)`,
+
+	// --- Миграции для существующих БД (ALTER TABLE) ---
+	// email_verified + verify_token + verify_expires
+	`DO $$ BEGIN
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token VARCHAR(64);
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_expires TIMESTAMPTZ;
+	EXCEPTION WHEN others THEN NULL;
+	END $$`,
+
+	// traffic_balance — баланс гигабайт (в байтах)
+	`DO $$ BEGIN
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS traffic_balance BIGINT DEFAULT 0;
+	EXCEPTION WHEN others THEN NULL;
+	END $$`,
+
+	`CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token) WHERE verify_token IS NOT NULL`,
+
+	// Таблица платежей (пригодится для Robokassa/Enot.io)
+	`CREATE TABLE IF NOT EXISTS payments (
+		id          SERIAL PRIMARY KEY,
+		user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+		amount_rub  NUMERIC(10,2) NOT NULL,
+		bytes_added BIGINT NOT NULL,
+		status      VARCHAR(20) NOT NULL DEFAULT 'pending',
+		provider    VARCHAR(50),
+		external_id VARCHAR(255),
+		created_at  TIMESTAMPTZ DEFAULT NOW(),
+		completed_at TIMESTAMPTZ
+	)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_payments_external_id ON payments(external_id)`,
 }
 
 func (db *DB) Migrate() error {

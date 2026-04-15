@@ -39,6 +39,7 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
+      BASE_URL: ":${BASE_URL:-http://localhost:8080}"
       LISTEN_ADDR: ":${LISTEN_PORT:-8080}"
       SECRET_KEY: ${SECRET_KEY:-change-me-to-random-string-32ch}
       DB_HOST: "127.0.0.1"
@@ -62,6 +63,11 @@ services:
       AMSTERDAM_SNI: ${AMSTERDAM_SNI:-www.google.com}
       AMSTERDAM_PUBLIC_KEY: ${AMSTERDAM_PUBLIC_KEY}
       AMSTERDAM_SHORT_ID: ${AMSTERDAM_SHORT_ID}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
     volumes:
       - xray-config:/etc/xray
       - xray-logs:/var/log/xray

@@ -16,14 +16,32 @@
 {{define "content"}}
 <h1 style="margin: 1.5rem 0;">Мои VPN профили</h1>
 
+<!-- Баланс -->
+<div class="card" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <span style="color: #94a3b8;">Баланс трафика:</span>
+        <strong style="font-size: 1.3rem; margin-left: 0.5rem;" id="balance-display">{{formatBytes .User.TrafficBalance}}</strong>
+    </div>
+    <a href="/pay" class="btn btn-primary">Пополнить</a>
+</div>
+
+<!-- Создание профиля -->
 <div class="card">
-    <form method="POST" action="/dashboard/profiles" style="display: flex; gap: 0.5rem; align-items: end;">
-        <div style="flex: 1;">
+    <form method="POST" action="/dashboard/profiles" style="display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 150px;">
             <label for="name">Имя профиля</label>
             <input type="text" id="name" name="name" placeholder="phone, laptop, ..." style="margin-bottom: 0;">
         </div>
+        <div style="min-width: 120px;">
+            <label for="limit_gb">Выделить ГБ</label>
+            <input type="number" id="limit_gb" name="limit_gb" step="0.5" min="0.5" value="5" required
+                style="margin-bottom: 0; width: 100%; padding: 0.6rem; border: 1px solid #334155; border-radius: 6px; background: #0f172a; color: #e2e8f0; font-size: 1rem;">
+        </div>
         <button type="submit" class="btn btn-primary">Создать профиль</button>
     </form>
+    <p style="color: #64748b; font-size: 0.8rem; margin-top: 0.5rem;">
+        ГБ списываются с баланса. При удалении профиля неиспользованный трафик возвращается.
+    </p>
 </div>
 
 {{if .Profiles}}
@@ -52,7 +70,7 @@
             <button class="btn btn-sm btn-primary" onclick="copyURI(this)" data-uri="{{.VlessURI}}">Копировать</button>
             <button class="btn btn-sm btn-primary" onclick="showQR(this)" data-uri="{{.VlessURI}}">QR</button>
             <form method="POST" action="/dashboard/profiles/{{.ID}}/delete" style="display:inline;">
-                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль?')">✕</button>
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль? Неиспользованный трафик вернётся на баланс.')">✕</button>
             </form>
         </div>
     </div>
@@ -85,7 +103,11 @@
 {{end}}
 {{else}}
 <div class="card" style="text-align: center; color: #94a3b8;">
-    У вас пока нет VPN профилей. Создайте первый!
+    {{if gt .User.TrafficBalance 0}}
+        У вас пока нет VPN профилей. Создайте первый!
+    {{else}}
+        Пополните баланс, чтобы создать VPN профиль.
+    {{end}}
 </div>
 {{end}}
 
@@ -117,13 +139,15 @@ function showQR(btn) {
     modal.style.display = 'flex';
 }
 
-// AJAX-обновление статистики каждые 5 секунд (без перезагрузки страницы)
-// Примечание: при активном соединении (splice) счётчики Xray обновляются после закрытия соединения
 function refreshStats() {
     fetch('/dashboard/stats')
         .then(r => r.json())
-        .then(stats => {
-            stats.forEach(s => {
+        .then(data => {
+            // Обновляем баланс
+            const balanceEl = document.getElementById('balance-display');
+            if (balanceEl && data.balance_fmt) balanceEl.textContent = data.balance_fmt;
+
+            (data.profiles || []).forEach(s => {
                 const card = document.querySelector(`[data-profile-id="${s.id}"]`);
                 if (!card) return;
 
@@ -144,7 +168,6 @@ function refreshStats() {
                     if (s.progress_color) bar.style.background = s.progress_color;
                 }
 
-                // Обновляем статус блокировки и онлайн-статус
                 const statusEl = card.querySelector('[data-stat="status"]');
                 const ipsEl = card.querySelector('[data-stat="ips"]');
                 if (statusEl) {
@@ -169,7 +192,6 @@ function refreshStats() {
                         statusEl.textContent = 'active';
                     }
                 }
-                // Обновляем прозрачность карточки
                 card.style.opacity = s.is_active ? '' : '0.6';
                 if (ipsEl) {
                     const ips = s.online_ips || [];

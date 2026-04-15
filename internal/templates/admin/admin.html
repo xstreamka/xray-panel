@@ -26,10 +26,6 @@
             <option value="15">15 сек</option>
             <option value="30" selected>30 сек</option>
             <option value="60">1 мин</option>
-            <option value="300">5 мин</option>
-            <option value="600">10 мин</option>
-            <option value="1800">30 мин</option>
-            <option value="3600">1 час</option>
         </select>
         <span id="refresh-countdown" style="color: #64748b; font-size: 0.8rem; min-width: 30px;"></span>
     </div>
@@ -43,6 +39,11 @@
             <span style="color: #94a3b8; margin-left: 0.5rem;">{{.Email}}</span>
             {{if .IsAdmin}}<span class="badge badge-green">admin</span>{{end}}
             {{if not .IsActive}}<span class="badge badge-red">blocked</span>{{end}}
+            {{if .EmailVerified}}
+                <span class="badge badge-green">✉ verified</span>
+            {{else}}
+                <span class="badge badge-red">✉ не подтверждён</span>
+            {{end}}
             {{if gt .OnlineCount 0}}
                 <span class="badge badge-green" data-stat="user-online">online ({{.OnlineCount}})</span>
             {{else}}
@@ -53,6 +54,18 @@
             <span class="stat" title="Профили (активные / всего)">📱 {{.ActiveCount}} / {{len .Profiles}}</span>
             <span class="stat" data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</span>
         </div>
+    </div>
+
+    <!-- Баланс и пополнение -->
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.8rem; padding: 0.5rem; background: #0f172a; border-radius: 6px;">
+        <span style="color: #94a3b8; font-size: 0.85rem;">Баланс:</span>
+        <strong data-stat="user-balance">{{formatBytes .TrafficBalance}}</strong>
+        <form method="POST" action="/admin/users/{{.ID}}/balance" style="display: flex; gap: 0.3rem; align-items: center; margin-left: auto;">
+            <input type="number" name="add_gb" step="0.5" min="0.5" value="5" placeholder="ГБ"
+                style="width: 70px; padding: 0.2rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem;">
+            <span style="color: #94a3b8; font-size: 0.8rem;">GB</span>
+            <button type="submit" class="btn btn-sm btn-primary">Пополнить</button>
+        </form>
     </div>
 
     {{if .Profiles}}
@@ -134,11 +147,8 @@ function refreshStats() {
                 const card = document.querySelector(`[data-user-id="${u.user_id}"]`);
                 if (!card) return;
 
-                // Обновляем онлайн-бейдж пользователя
                 const userOnline = card.querySelector('[data-stat="user-online"]');
                 if (userOnline) {
-                    userOnline.style.background = '';
-                    userOnline.style.color = '';
                     if (u.online_count > 0) {
                         userOnline.className = 'badge badge-green';
                         userOnline.textContent = 'online (' + u.online_count + ')';
@@ -148,11 +158,12 @@ function refreshStats() {
                     }
                 }
 
-                // Обновляем общий трафик пользователя
                 const userTotal = card.querySelector('[data-stat="user-total"]');
                 if (userTotal) userTotal.textContent = 'Σ ' + u.total_traffic_fmt;
 
-                // Обновляем профили
+                const userBalance = card.querySelector('[data-stat="user-balance"]');
+                if (userBalance && u.balance_fmt) userBalance.textContent = u.balance_fmt;
+
                 (u.profiles || []).forEach(p => {
                     const row = card.querySelector(`[data-profile-id="${p.id}"]`);
                     if (!row) return;
@@ -162,10 +173,7 @@ function refreshStats() {
                     const traffic = row.querySelector('[data-stat="profile-traffic"]');
 
                     if (status) {
-                        status.style.background = '';
-                        status.style.color = '';
                         if (status.textContent.trim() === 'disabled') {
-                            // Не меняем disabled-профили через AJAX
                         } else if (p.is_online) {
                             status.className = 'badge badge-green';
                             status.textContent = '● online';
@@ -212,7 +220,6 @@ function updateCountdown() {
     if (remaining < 0) remaining = parseInt(document.getElementById('refresh-interval').value);
 }
 
-// Восстанавливаем из localStorage
 (function() {
     const saved = localStorage.getItem('admin-refresh') || '30';
     document.getElementById('refresh-interval').value = saved;

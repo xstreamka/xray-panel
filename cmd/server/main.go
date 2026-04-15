@@ -13,6 +13,7 @@ import (
 
 	"xray-panel/internal/config"
 	"xray-panel/internal/database"
+	"xray-panel/internal/email"
 	"xray-panel/internal/handlers"
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
@@ -60,6 +61,15 @@ func main() {
 
 	go connectXray(ctx, cfg, xrayHolder, profileStore)
 
+	// Email sender (nil если SMTP не настроен)
+	var mailer *email.Sender
+	if cfg.SMTPConfigured() {
+		mailer = email.NewSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom)
+		log.Println("SMTP configured")
+	} else {
+		log.Println("SMTP not configured — verification links will be logged to console")
+	}
+
 	// Шаблоны
 	funcMap := template.FuncMap{
 		"formatBytes": formatBytes,
@@ -81,8 +91,8 @@ func main() {
 	}
 
 	authMW := middleware.NewAuthMiddleware(userStore, cfg.SecretKey)
-	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer)
-	dashHandler := handlers.NewDashboardHandler(profileStore, xrayHolder, cfg, renderer)
+	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL)
+	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, xrayHolder, renderer)
 
 	// Rate limiter: 5 попыток в минуту на IP
@@ -99,14 +109,27 @@ func main() {
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 	})
+
+	// Публичные роуты
 	r.Get("/login", authHandler.LoginPage)
 	r.With(loginLimiter.Middleware).Post("/login", authHandler.Login)
 	r.Get("/register", authHandler.RegisterPage)
 	r.With(loginLimiter.Middleware).Post("/register", authHandler.Register)
+	r.Get("/verify", authHandler.VerifyEmail) // GET /verify?token=xxx
 	r.Get("/logout", authHandler.Logout)
 
+	// Роуты для залогиненных, но НЕ обязательно верифицированных
 	r.Group(func(r chi.Router) {
 		r.Use(authMW.RequireAuth)
+		r.Get("/verify-pending", authHandler.VerifyPendingPage)
+		r.With(loginLimiter.Middleware).Post("/resend-verification", authHandler.ResendVerification)
+	})
+
+	// Роуты для залогиненных И верифицированных
+	r.Group(func(r chi.Router) {
+		r.Use(authMW.RequireAuth)
+		r.Use(authMW.RequireVerified)
+
 		r.Get("/dashboard", dashHandler.Index)
 		r.Get("/dashboard/stats", dashHandler.StatsJSON)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
@@ -120,6 +143,7 @@ func main() {
 			r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
 			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
 			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
+			r.Post("/admin/users/{id}/balance", adminHandler.AddBalance)
 		})
 	})
 
@@ -146,7 +170,6 @@ func main() {
 }
 
 func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, profiles *models.VPNProfileStore) {
-	// Инициализируем firewall (iptables chain) до подключения к Xray
 	firewall := xray.NewFirewall()
 	firewall.Init()
 	holder.SetFirewall(firewall)

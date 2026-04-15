@@ -1,0 +1,25 @@
+{{template "base" .}}
+
+{{define "title"}}Подтверждение email — VPN Panel{{end}}
+
+{{define "content"}}
+<div style="max-width: 450px; margin: 4rem auto;">
+    <div class="card" style="text-align: center;">
+        {{if .Success}}
+            <h2 style="margin-bottom: 1rem;">✅ Email подтверждён!</h2>
+            <p style="color: #94a3b8; margin-bottom: 1.5rem;">
+                Аккаунт активирован. Пополните баланс и создайте VPN профиль.
+            </p>
+            <a href="/dashboard" class="btn btn-primary">Перейти в панель</a>
+        {{else}}
+            <h2 style="margin-bottom: 1rem;">❌ Ошибка</h2>
+            {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+            <p style="color: #94a3b8; margin-top: 1rem;">
+                <a href="/register" style="color: #38bdf8;">Зарегистрироваться заново</a>
+                или
+                <a href="/login" style="color: #38bdf8;">войти</a>
+            </p>
+        {{end}}
+    </div>
+</div>
+{{end}}

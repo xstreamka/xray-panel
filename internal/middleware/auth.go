@@ -29,7 +29,7 @@ func NewAuthMiddleware(userStore *models.UserStore, secretKey string) *AuthMiddl
 	return &AuthMiddleware{userStore: userStore, secretKey: secretKey}
 }
 
-// RequireAuth — middleware для защищённых роутов
+// RequireAuth — middleware для защищённых роутов (без проверки email)
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, err := m.getUserFromCookie(r)
@@ -39,6 +39,22 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), userContextKey, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// RequireVerified — middleware: auth + email подтверждён
+func (m *AuthMiddleware) RequireVerified(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := UserFromContext(r.Context())
+		if user == nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		if !user.EmailVerified {
+			http.Redirect(w, r, "/verify-pending", http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -63,9 +79,9 @@ func (m *AuthMiddleware) SetSession(w http.ResponseWriter, userID int) {
 		Value:    value + "|" + sig,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // поменять на true когда будет за nginx с HTTPS
+		Secure:   false,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400 * 30, // 30 дней
+		MaxAge:   86400 * 30,
 	}
 	http.SetCookie(w, cookie)
 }
@@ -97,7 +113,6 @@ func (m *AuthMiddleware) getUserFromCookie(r *http.Request) (*models.User, error
 		return nil, fmt.Errorf("invalid signature")
 	}
 
-	// Проверка возраста сессии
 	ts, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid timestamp")

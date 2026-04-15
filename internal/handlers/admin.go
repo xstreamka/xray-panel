@@ -33,7 +33,6 @@ func (h *AdminHandler) enrichAllProfiles(ctx context.Context, profiles []models.
 	enriched = profiles
 	onlineUsers = make(map[string]bool)
 
-	// Сначала пробуем snapshot
 	if collector := h.xrayHolder.GetCollector(); collector != nil {
 		liveTraffic, online, ips := collector.Snapshot()
 		if liveTraffic != nil {
@@ -49,7 +48,6 @@ func (h *AdminHandler) enrichAllProfiles(ctx context.Context, profiles []models.
 		}
 	}
 
-	// Fallback: прямой gRPC
 	if client := h.xrayHolder.Get(); client != nil {
 		var liveTraffic map[string][2]int64
 		if lt, err := client.QueryAllUserTraffic(ctx, false); err == nil {
@@ -141,7 +139,6 @@ func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "activate":
-		// Убираем iptables-блокировку
 		if fw := h.xrayHolder.GetFirewall(); fw != nil {
 			fw.UnblockUser(profile.UUID)
 		}
@@ -153,7 +150,6 @@ func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Admin: xray add error: %v", err)
 			}
 		}
-		// Обновляем лимит в collector
 		if collector := h.xrayHolder.GetCollector(); collector != nil {
 			collector.UpdateLimit(profile.UUID, profile.TrafficLimit)
 		}
@@ -164,7 +160,6 @@ func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Admin: deactivate error: %v", err)
 		}
 		if client := h.xrayHolder.Get(); client != nil {
-			// Блокируем TCP через iptables (правила живут до реактивации)
 			if fw := h.xrayHolder.GetFirewall(); fw != nil {
 				fw.BlockUser(r.Context(), client, profile.UUID)
 			}
@@ -188,7 +183,6 @@ func (h *AdminHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Admin: set limit error: %v", err)
 	}
 
-	// Обновляем лимит в кэше collector'а
 	profile, err := h.profiles.GetByID(r.Context(), id)
 	if err == nil {
 		if collector := h.xrayHolder.GetCollector(); collector != nil {
@@ -212,13 +206,11 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Admin: reset traffic error: %v", err)
 	}
 
-	// Сбрасываем кумулятивный счётчик в collector'е
 	if collector := h.xrayHolder.GetCollector(); collector != nil {
 		collector.ResetCumulative(profile.UUID)
 	}
 
 	if !profile.IsActive {
-		// Убираем iptables-блокировку
 		if fw := h.xrayHolder.GetFirewall(); fw != nil {
 			fw.UnblockUser(profile.UUID)
 		}
@@ -226,13 +218,34 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 		if client := h.xrayHolder.Get(); client != nil {
 			client.AddUser(r.Context(), profile.UUID, profile.UUID)
 		}
-		// Восстанавливаем лимит в collector
 		if collector := h.xrayHolder.GetCollector(); collector != nil {
 			collector.UpdateLimit(profile.UUID, profile.TrafficLimit)
 		}
 		log.Printf("Admin: profile %s reactivated after traffic reset", profile.UUID)
 	}
 
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// AddBalance — POST /admin/users/{id}/balance — пополнить баланс пользователя
+func (h *AdminHandler) AddBalance(w http.ResponseWriter, r *http.Request) {
+	userID, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	addGB, _ := strconv.ParseFloat(r.FormValue("add_gb"), 64)
+
+	if addGB <= 0 {
+		http.Error(w, "Укажите количество ГБ > 0", http.StatusBadRequest)
+		return
+	}
+
+	addBytes := int64(addGB * 1024 * 1024 * 1024)
+
+	if err := h.users.AddBalance(r.Context(), userID, addBytes); err != nil {
+		log.Printf("Admin: add balance error for user %d: %v", userID, err)
+		http.Error(w, "Ошибка пополнения баланса", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Admin: added %.1f GB to user %d", addGB, userID)
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
@@ -248,6 +261,7 @@ type adminUserStatsJSON struct {
 	UserID      int                     `json:"user_id"`
 	OnlineCount int                     `json:"online_count"`
 	Total       string                  `json:"total_traffic_fmt"`
+	BalanceFmt  string                  `json:"balance_fmt"`
 	Profiles    []adminProfileStatsJSON `json:"profiles"`
 }
 
@@ -282,7 +296,10 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]adminUserStatsJSON, 0, len(users))
 	for _, u := range users {
-		uv := adminUserStatsJSON{UserID: u.ID}
+		uv := adminUserStatsJSON{
+			UserID:     u.ID,
+			BalanceFmt: formatBytesGo(u.TrafficBalance),
+		}
 		var totalTraffic int64
 		for _, p := range profilesByUser[u.ID] {
 			totalTraffic += p.TrafficUp + p.TrafficDown

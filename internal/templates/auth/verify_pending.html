@@ -1,0 +1,29 @@
+{{template "base" .}}
+
+{{define "title"}}Подтвердите email — VPN Panel{{end}}
+
+{{define "content"}}
+<div style="max-width: 450px; margin: 4rem auto;">
+    <div class="card" style="text-align: center;">
+        <h2 style="margin-bottom: 1rem;">📧 Подтвердите email</h2>
+
+        {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+        {{if .Success}}<div style="background: #14532d; color: #86efac; padding: 0.8rem; border-radius: 6px; margin-bottom: 1rem;">{{.Success}}</div>{{end}}
+
+        <p style="color: #94a3b8; margin-bottom: 1.5rem;">
+            Мы отправили письмо на <strong style="color: #e2e8f0;">{{.User.Email}}</strong>.<br>
+            Перейдите по ссылке в письме для активации аккаунта.
+        </p>
+
+        <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 1rem;">
+            Ссылка действует 24 часа. Проверьте папку «Спам».
+        </p>
+
+        <form method="POST" action="/resend-verification" style="margin-bottom: 1rem;">
+            <button type="submit" class="btn btn-primary">Отправить повторно</button>
+        </form>
+
+        <a href="/logout" style="color: #94a3b8; font-size: 0.85rem;">Выйти</a>
+    </div>
+</div>
+{{end}}
