@@ -10,8 +10,12 @@ import (
 
 // GenerateConfig создаёт config.json для Xray с включённым API, stats и policy
 func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string) error {
-	// Собираем clients из активных UUID
-	clients := make([]map[string]any, 0, len(activeUUIDs))
+	// Пустой clients — пользователями управляем исключительно через gRPC API
+	// (syncUsersToXray добавляет активных при старте через AddUser).
+	// Это критично: RemoveUser работает ТОЛЬКО для API-добавленных пользователей,
+	// статических из конфига оно не трогает!
+	clients := []map[string]any{}
+	_ = activeUUIDs // используются только для логирования в main.g
 	for _, uuid := range activeUUIDs {
 		clients = append(clients, map[string]any{
 			"id":    uuid,
