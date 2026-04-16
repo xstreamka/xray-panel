@@ -33,6 +33,13 @@
 </div>
 {{end}}
 
+{{if eq .Status "cancelled"}}
+<div class="card" style="border: 1px solid #64748b; background: #1a1f2e;">
+    <h2 style="margin-bottom: 0.5rem;">Заказ отменён</h2>
+    <p style="color: #94a3b8;">Вы отменили оплату. Выберите тариф заново, если хотите продолжить.</p>
+</div>
+{{end}}
+
 <h1 style="margin: 1.5rem 0;">Пополнить баланс</h1>
 
 <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
