@@ -97,7 +97,7 @@ func main() {
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, xrayHolder, renderer)
 	payHandler := handlers.NewPayHandler(
-		renderer, tariffStore, receiptStore,
+		renderer, tariffStore, receiptStore, userStore, mailer,
 		cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret,
 	)
 

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"xray-panel/internal/email"
 
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
@@ -21,6 +23,8 @@ type PayHandler struct {
 	renderer      *Renderer
 	tariffs       *models.TariffStore
 	receipts      *models.PaymentReceiptStore
+	users         *models.UserStore
+	mailer        *email.Sender
 	payServiceURL string
 	panelBaseURL  string
 	webhookSecret string
@@ -43,12 +47,16 @@ func NewPayHandler(
 	renderer *Renderer,
 	tariffs *models.TariffStore,
 	receipts *models.PaymentReceiptStore,
+	users *models.UserStore,
+	mailer *email.Sender,
 	payServiceURL, panelBaseURL, webhookSecret string,
 ) *PayHandler {
 	return &PayHandler{
 		renderer:      renderer,
 		tariffs:       tariffs,
 		receipts:      receipts,
+		users:         users,
+		mailer:        mailer,
 		payServiceURL: strings.TrimRight(payServiceURL, "/"),
 		panelBaseURL:  strings.TrimRight(panelBaseURL, "/"),
 		webhookSecret: webhookSecret,
@@ -189,7 +197,17 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 7. Тариф — источник истины по ГБ и сумме (metadata НЕ доверяем)
+	// 7. Парсим metadata — там traffic_gb, зафиксированный на момент checkout
+	var meta struct {
+		TrafficGB float64 `json:"traffic_gb"`
+	}
+	if len(p.Metadata) > 0 {
+		if err := json.Unmarshal(p.Metadata, &meta); err != nil {
+			log.Printf("Webhook: inv_id=%d metadata parse error: %v", p.InvID, err)
+		}
+	}
+
+	// 8. Sanity-check: тариф должен существовать (защита от мусорных plan_id)
 	tariff, err := h.tariffs.GetByCode(r.Context(), p.PlanID)
 	if err != nil {
 		log.Printf("Webhook: inv_id=%d unknown plan_id=%q: %v", p.InvID, p.PlanID, err)
@@ -197,27 +215,48 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 8. Сверка суммы — защита на случай, если кто-то в БД pay-service подменил amount.
-	//    Если суммы расходятся — начисляем всё равно (деньги уже списаны), но громко логируем.
-	if p.Amount != tariff.AmountRub {
-		log.Printf("Webhook: inv_id=%d AMOUNT MISMATCH got=%.2f expected=%.2f plan=%s",
-			p.InvID, p.Amount, tariff.AmountRub, tariff.Code)
+	// 9. Определяем, сколько ГБ начислить. Приоритет: metadata → тариф (fallback).
+	trafficGB := meta.TrafficGB
+	if trafficGB <= 0 {
+		log.Printf("Webhook: inv_id=%d metadata.traffic_gb missing, fallback to tariff %q",
+			p.InvID, tariff.Code)
+		trafficGB = tariff.TrafficGB
+	}
+	if trafficGB <= 0 {
+		log.Printf("Webhook: inv_id=%d traffic_gb not determined", p.InvID)
+		http.Error(w, "invalid traffic amount", http.StatusBadRequest)
+		return
 	}
 
-	trafficBytes := int64(tariff.TrafficGB * 1024 * 1024 * 1024)
+	// 10. Разумный диапазон — защита от JSON-сюрпризов (0.1 … 10000 ГБ)
+	if trafficGB < 0.1 || trafficGB > 10000 {
+		log.Printf("Webhook: inv_id=%d traffic_gb=%.2f out of range", p.InvID, trafficGB)
+		http.Error(w, "invalid traffic amount", http.StatusBadRequest)
+		return
+	}
+
+	// 11. Сумма — всегда из payload (это что реально списалось)
+	amountRub := p.Amount
+	if amountRub <= 0 {
+		log.Printf("Webhook: inv_id=%d invalid amount=%.2f", p.InvID, amountRub)
+		http.Error(w, "invalid amount", http.StatusBadRequest)
+		return
+	}
+
+	trafficBytes := int64(trafficGB * 1024 * 1024 * 1024)
 
 	paidAt, err := time.Parse(time.RFC3339, p.PaidAt)
 	if err != nil {
 		paidAt = time.Now()
 	}
 
-	// 9. Атомарно: квитанция + баланс
+	// 12. Атомарно: квитанция + баланс
 	receipt := &models.PaymentReceipt{
 		InvID:        p.InvID,
 		UserID:       userID,
 		PlanID:       tariff.Code,
-		AmountRub:    tariff.AmountRub,
-		TrafficBytes: trafficBytes,
+		AmountRub:    amountRub,    // ← из payload
+		TrafficBytes: trafficBytes, // ← из metadata
 		PaidAt:       paidAt,
 		RawPayload:   body,
 	}
@@ -237,9 +276,32 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("Webhook: inv_id=%d PAID — user=%d plan=%s +%.1f GB (%.2f ₽)",
-		p.InvID, userID, tariff.Code, tariff.TrafficGB, tariff.AmountRub)
+		p.InvID, userID, tariff.Code, trafficGB, amountRub)
+
+	if h.mailer != nil {
+		go h.sendTopupEmail(userID, p.InvID, trafficGB, amountRub)
+	}
 
 	writeOK(w)
+}
+
+func (h *PayHandler) sendTopupEmail(userID, invID int, trafficGB, amountRub float64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	u, err := h.users.GetByID(ctx, userID)
+	if err != nil {
+		log.Printf("Topup mail: get user %d failed: %v", userID, err)
+		return
+	}
+
+	if err := h.mailer.SendTopupNotification(
+		u.Email, u.Username, trafficGB, amountRub, invID, h.panelBaseURL,
+	); err != nil {
+		log.Printf("Topup mail: send to %s failed: %v", u.Email, err)
+		return
+	}
+	log.Printf("Topup mail: sent to %s (user %d, inv_id=%d)", u.Email, userID, invID)
 }
 
 func writeOK(w http.ResponseWriter) {

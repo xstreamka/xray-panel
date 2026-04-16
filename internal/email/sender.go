@@ -47,6 +47,30 @@ VPN Panel`, verifyURL)
 	return s.send(to, subject, body)
 }
 
+// SendTopupNotification — уведомление о зачислении баланса после оплаты.
+func (s *Sender) SendTopupNotification(to, username string, trafficGB, amountRub float64, invID int, baseURL string) error {
+	dashURL := strings.TrimRight(baseURL, "/") + "/dashboard"
+
+	subject := fmt.Sprintf("Баланс пополнен на %.1f ГБ — VPN Panel", trafficGB)
+	body := fmt.Sprintf(`Привет, %s!
+
+Оплата получена, баланс пополнен.
+
+Заказ:      №%d
+Сумма:      %.2f ₽
+Зачислено:  %.1f ГБ
+
+Создать профиль или посмотреть баланс:
+%s
+
+Если оплату совершали не вы — ответьте на это письмо.
+
+—
+VPN Panel`, username, invID, amountRub, trafficGB, dashURL)
+
+	return s.send(to, subject, body)
+}
+
 func (s *Sender) send(to, subject, body string) error {
 	msg := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n%s",
