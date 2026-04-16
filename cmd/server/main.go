@@ -147,6 +147,7 @@ func main() {
 		// Оплата (редирект на pay-service)
 		r.Get("/pay", payHandler.Index)
 		r.Post("/pay/checkout", payHandler.Checkout)
+		r.Get("/pay/history", payHandler.History)
 
 		// Админка
 		r.Group(func(r chi.Router) {

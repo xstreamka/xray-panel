@@ -1,0 +1,63 @@
+{{template "base" .}}
+
+{{define "title"}}История пополнений — VPN Panel{{end}}
+
+{{define "nav"}}
+<nav>
+    <span class="brand">VPN Panel</span>
+    <div>
+        <span style="color: #e2e8f0;">{{.User.Username}}</span>
+        {{if .User.IsAdmin}}<a href="/admin">Админка</a>{{end}}
+        <a href="/dashboard">Dashboard</a>
+        <a href="/pay">Пополнить</a>
+        <a href="/logout">Выход</a>
+    </div>
+</nav>
+{{end}}
+
+{{define "content"}}
+<div class="card" style="display: flex; justify-content: space-between; align-items: center;">
+    <h2 style="margin: 0;">История пополнений</h2>
+    <a href="/dashboard" style="color: #38bdf8; text-decoration: none;">← Вернуться</a>
+</div>
+
+{{if .Receipts}}
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Заказ</th>
+                <th>Тариф</th>
+                <th style="text-align: right;">Зачислено</th>
+                <th style="text-align: right;">Сумма</th>
+            </tr>
+        </thead>
+        <tbody>
+        {{range .Receipts}}
+            <tr>
+                <td style="color: #94a3b8; white-space: nowrap;">
+                    {{.PaidAt.Format "02.01.2006 15:04"}}
+                </td>
+                <td style="font-family: monospace; color: #64748b;">№{{.InvID}}</td>
+                <td><span class="badge badge-blue">{{.PlanID}}</span></td>
+                <td style="text-align: right; color: #22c55e; font-weight: 600;">
+                    +{{formatBytes .TrafficBytes}}
+                </td>
+                <td style="text-align: right; font-weight: 600;">
+                    {{printf "%.2f" .AmountRub}} ₽
+                </td>
+            </tr>
+        {{end}}
+        </tbody>
+    </table>
+</div>
+{{else}}
+<div class="card" style="text-align: center; padding: 3rem 1rem;">
+    <p style="color: #94a3b8; margin-bottom: 1rem;">
+        Пока нет ни одного пополнения.
+    </p>
+    <a href="/pay" class="btn btn-primary">Пополнить баланс</a>
+</div>
+{{end}}
+{{end}}

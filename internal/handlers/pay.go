@@ -304,6 +304,23 @@ func (h *PayHandler) sendTopupEmail(userID, invID int, trafficGB, amountRub floa
 	log.Printf("Topup mail: sent to %s (user %d, inv_id=%d)", u.Email, userID, invID)
 }
 
+// History — GET /pay/history — список пополнений пользователя
+func (h *PayHandler) History(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	receipts, err := h.receipts.ListByUser(r.Context(), user.ID, 100)
+	if err != nil {
+		log.Printf("Pay history: list error for user %d: %v", user.ID, err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	h.renderer.Render(w, "payments_history.html", map[string]any{
+		"User":     user,
+		"Receipts": receipts,
+	})
+}
+
 func writeOK(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

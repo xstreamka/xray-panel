@@ -22,7 +22,10 @@
         <span style="color: #94a3b8;">Баланс трафика:</span>
         <strong style="font-size: 1.3rem; margin-left: 0.5rem;" id="balance-display">{{formatBytes .User.TrafficBalance}}</strong>
     </div>
-    <a href="/pay" class="btn btn-primary">Пополнить</a>
+    <div style="display: flex; column-gap: 0.5rem;">
+        <a href="/pay" class="btn btn-primary">Пополнить</a>
+        <a href="/pay/history" class="btn btn-primary">История</a>
+    </div>
 </div>
 
 <!-- Создание профиля -->
