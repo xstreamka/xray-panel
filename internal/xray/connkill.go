@@ -14,7 +14,7 @@ import (
 // Используем ss -K вместо iptables REJECT:
 //   - ss -K мгновенно убивает существующие соединения (TCP RST)
 //   - НЕ создаёт постоянных правил → не блокирует доступ к веб-панели/лендингу
-//   - Новые VPN-подключения и так не пройдут: RemoveUser удаляет UUID из Xray
+//   - Новые VPN-подключения не пройдут: RemoveUser удаляет UUID из Xray
 type Firewall struct{}
 
 func NewFirewall() *Firewall {
@@ -23,11 +23,8 @@ func NewFirewall() *Firewall {
 
 // Init очищает legacy iptables chain VPN_BLOCK, если она осталась от старой версии.
 func (f *Firewall) Init() {
-	// Удаляем ссылки на chain из INPUT/OUTPUT (ошибки игнорируем — может не быть)
 	exec.Command("iptables", "-D", "INPUT", "-j", "VPN_BLOCK").Run()
 	exec.Command("iptables", "-D", "OUTPUT", "-j", "VPN_BLOCK").Run()
-
-	// Очищаем и удаляем саму chain
 	exec.Command("iptables", "-F", "VPN_BLOCK").Run()
 	exec.Command("iptables", "-X", "VPN_BLOCK").Run()
 
@@ -36,9 +33,11 @@ func (f *Firewall) Init() {
 
 // BlockUser убивает все активные TCP-соединения пользователя на порту 443.
 //
-// В отличие от iptables REJECT, это одноразовое действие:
-// существующие соединения рвутся, но будущие подключения к веб-панели не блокируются.
-// Защита от новых VPN-сессий обеспечивается вызовом RemoveUser (отдельно).
+// ВАЖНО: фильтр ss -K использует терминологию local/remote:
+//   - dst  = remote peer address (IP юзера)
+//   - sport = local port (443 — порт Xray)
+//
+// RemoveUser вызывается ДО BlockUser и гарантирует, что реконнект не пройдёт.
 func (f *Firewall) BlockUser(ctx context.Context, client *Client, uuid string) int {
 	resp, err := client.stats.GetStatsOnlineIpList(ctx, &statsService.GetStatsRequest{
 		Name: fmt.Sprintf("user>>>%s>>>online", uuid),
@@ -55,8 +54,8 @@ func (f *Firewall) BlockUser(ctx context.Context, client *Client, uuid string) i
 
 	killed := 0
 	for ip := range ips {
-		// ss -K убивает TCP-сокеты по фильтру: src IP + dport 443
-		err := exec.Command("ss", "-K", "src", ip, "dport", "=", "443").Run()
+		// dst = remote address (юзер), sport = local port (Xray слушает на 443)
+		err := exec.Command("ss", "-K", "dst", ip, "sport", "=", "443").Run()
 		if err != nil {
 			log.Printf("Firewall: ss -K failed for %s: %v", ip, err)
 			continue
@@ -69,6 +68,4 @@ func (f *Firewall) BlockUser(ctx context.Context, client *Client, uuid string) i
 }
 
 // UnblockUser — no-op: ss -K не создаёт постоянных правил, чистить нечего.
-func (f *Firewall) UnblockUser(uuid string) {
-	// Ничего делать не нужно — постоянных блокировок нет.
-}
+func (f *Firewall) UnblockUser(uuid string) {}
