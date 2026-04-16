@@ -11,45 +11,51 @@ import (
 	"time"
 
 	"xray-panel/internal/middleware"
+	"xray-panel/internal/models"
 	"xray-panel/internal/paysign"
-	"xray-panel/internal/tariffs"
 )
 
 type PayHandler struct {
 	renderer      *Renderer
-	payServiceURL string // https://xstreamka.dev
-	panelBaseURL  string // https://panel.xstreamka.dev — куда Робокасса/pay-service вернут пользователя и webhook
+	tariffs       *models.TariffStore
+	payServiceURL string
+	panelBaseURL  string
 	webhookSecret string
 }
 
-func NewPayHandler(renderer *Renderer, payServiceURL, panelBaseURL, webhookSecret string) *PayHandler {
+func NewPayHandler(renderer *Renderer, tariffs *models.TariffStore, payServiceURL, panelBaseURL, webhookSecret string) *PayHandler {
 	return &PayHandler{
 		renderer:      renderer,
+		tariffs:       tariffs,
 		payServiceURL: strings.TrimRight(payServiceURL, "/"),
 		panelBaseURL:  strings.TrimRight(panelBaseURL, "/"),
 		webhookSecret: webhookSecret,
 	}
 }
 
-// Index — GET /pay — страница тарифов + сообщение о результате оплаты (?payment=success|failed&inv_id=…)
 func (h *PayHandler) Index(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
-	// Блокируем страницу если конфиг не настроен — так видно на dev-стенде.
 	if h.payServiceURL == "" || h.webhookSecret == "" {
 		http.Error(w, "Оплата временно недоступна: PAY_SERVICE_URL или WEBHOOK_SECRET не настроены", http.StatusServiceUnavailable)
 		return
 	}
 
+	tariffs, err := h.tariffs.ListActive(r.Context())
+	if err != nil {
+		log.Printf("Pay: list tariffs error: %v", err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
 	h.renderer.Render(w, "pay.html", map[string]any{
 		"User":    user,
-		"Tariffs": tariffs.List,
-		"Status":  r.URL.Query().Get("payment"), // success | failed | ""
+		"Tariffs": tariffs,
+		"Status":  r.URL.Query().Get("payment"),
 		"InvID":   r.URL.Query().Get("inv_id"),
 	})
 }
 
-// Checkout — POST /pay/checkout — формирует подписанную ссылку и редиректит на pay-service.
 func (h *PayHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
@@ -58,22 +64,25 @@ func (h *PayHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	planID := r.FormValue("plan_id")
-	tariff := tariffs.FindByID(planID)
-	if tariff == nil {
+	code := r.FormValue("plan_id")
+	tariff, err := h.tariffs.GetByCode(r.Context(), code)
+	if err != nil {
 		http.Error(w, "Неизвестный тариф", http.StatusBadRequest)
 		return
 	}
+	if !tariff.IsActive {
+		http.Error(w, "Тариф отключён", http.StatusBadRequest)
+		return
+	}
 
-	// metadata вернётся к нам в webhook → по traffic_gb начислим баланс
 	metadata, _ := json.Marshal(map[string]any{
 		"traffic_gb": tariff.TrafficGB,
 	})
 
 	params := map[string]string{
 		"product_type": "vpn",
-		"plan_id":      tariff.ID,
-		"amount":       fmt.Sprintf("%.2f", tariff.Amount),
+		"plan_id":      tariff.Code,
+		"amount":       fmt.Sprintf("%.2f", tariff.AmountRub),
 		"description":  tariff.Description,
 		"user_ref":     strconv.Itoa(user.ID),
 		"email":        user.Email,
@@ -92,8 +101,8 @@ func (h *PayHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 	q.Set("sig", sig)
 
 	checkoutURL := h.payServiceURL + "/pay/checkout?" + q.Encode()
-
-	log.Printf("Pay: user %d (%s) → checkout %s (%.2f ₽)", user.ID, user.Email, tariff.ID, tariff.Amount)
+	log.Printf("Pay: user %d (%s) → checkout %s (%.2f ₽)",
+		user.ID, user.Email, tariff.Code, tariff.AmountRub)
 
 	http.Redirect(w, r, checkoutURL, http.StatusSeeOther)
 }

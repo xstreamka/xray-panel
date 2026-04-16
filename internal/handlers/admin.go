@@ -3,9 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"xray-panel/internal/models"
 	"xray-panel/internal/xray"
@@ -16,12 +19,22 @@ import (
 type AdminHandler struct {
 	users      *models.UserStore
 	profiles   *models.VPNProfileStore
+	tariffs    *models.TariffStore
 	xrayHolder *xray.Holder
 	renderer   *Renderer
 }
 
-func NewAdminHandler(users *models.UserStore, profiles *models.VPNProfileStore, xrayHolder *xray.Holder, renderer *Renderer) *AdminHandler {
-	return &AdminHandler{users: users, profiles: profiles, xrayHolder: xrayHolder, renderer: renderer}
+func NewAdminHandler(
+	users *models.UserStore,
+	profiles *models.VPNProfileStore,
+	tariffs *models.TariffStore,
+	xrayHolder *xray.Holder,
+	renderer *Renderer,
+) *AdminHandler {
+	return &AdminHandler{
+		users: users, profiles: profiles, tariffs: tariffs,
+		xrayHolder: xrayHolder, renderer: renderer,
+	}
 }
 
 // enrichAllProfiles добавляет live-трафик и онлайн-статус ко всем профилям
@@ -320,4 +333,111 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// ──────────────────────────────────────────────
+// Тарифы
+// ──────────────────────────────────────────────
+
+func (h *AdminHandler) TariffsList(w http.ResponseWriter, r *http.Request) {
+	tariffs, err := h.tariffs.ListAll(r.Context())
+	if err != nil {
+		log.Printf("Admin: list tariffs error: %v", err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	h.renderer.Render(w, "tariffs.html", map[string]any{
+		"Tariffs": tariffs,
+	})
+}
+
+func (h *AdminHandler) TariffCreate(w http.ResponseWriter, r *http.Request) {
+	t := parseTariffForm(r)
+	if err := validateTariff(t); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := h.tariffs.Create(r.Context(), t); err != nil {
+		log.Printf("Admin: tariff create error: %v", err)
+		http.Error(w, "Ошибка создания тарифа: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Admin: tariff created code=%s amount=%.2f traffic=%.1f",
+		t.Code, t.AmountRub, t.TrafficGB)
+	http.Redirect(w, r, "/admin/tariffs", http.StatusSeeOther)
+}
+
+func (h *AdminHandler) TariffUpdate(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	t := parseTariffForm(r)
+	t.ID = id
+	if err := validateTariff(t); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := h.tariffs.Update(r.Context(), t); err != nil {
+		log.Printf("Admin: tariff update error: %v", err)
+		http.Error(w, "Ошибка обновления: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/tariffs", http.StatusSeeOther)
+}
+
+func (h *AdminHandler) TariffDelete(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	if err := h.tariffs.Delete(r.Context(), id); err != nil {
+		log.Printf("Admin: tariff delete error: %v", err)
+		http.Error(w, "Ошибка удаления", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/tariffs", http.StatusSeeOther)
+}
+
+func parseTariffForm(r *http.Request) *models.Tariff {
+	amount, _ := strconv.ParseFloat(r.FormValue("amount_rub"), 64)
+	gb, _ := strconv.ParseFloat(r.FormValue("traffic_gb"), 64)
+	sortOrder, _ := strconv.Atoi(r.FormValue("sort_order"))
+	return &models.Tariff{
+		Code:        strings.TrimSpace(r.FormValue("code")),
+		Label:       strings.TrimSpace(r.FormValue("label")),
+		Description: strings.TrimSpace(r.FormValue("description")),
+		AmountRub:   amount,
+		TrafficGB:   gb,
+		IsPopular:   r.FormValue("is_popular") == "on",
+		IsActive:    r.FormValue("is_active") == "on",
+		SortOrder:   sortOrder,
+	}
+}
+
+func validateTariff(t *models.Tariff) error {
+	if t.Code == "" || t.Label == "" || t.Description == "" {
+		return fmt.Errorf("заполните код, название и описание")
+	}
+	if t.AmountRub <= 0 {
+		return fmt.Errorf("цена должна быть больше нуля")
+	}
+	if t.TrafficGB <= 0 {
+		return fmt.Errorf("количество ГБ должно быть больше нуля")
+	}
+	// Description уходит в Робокассу. Допустимы латиница, кириллица, цифры,
+	// пробел и базовые знаки препинания. Длина — максимум 100 символов.
+	if utf8.RuneCountInString(t.Description) > 100 {
+		return fmt.Errorf("описание не длиннее 100 символов")
+	}
+	for _, r := range t.Description {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r >= 'а' && r <= 'я',
+			r >= 'А' && r <= 'Я',
+			r == 'ё', r == 'Ё',
+			r == ' ', r == '.', r == ',', r == '!', r == '?',
+			r == '-', r == '(', r == ')', r == ':', r == ';':
+			// ок
+		default:
+			return fmt.Errorf("недопустимый символ в описании: %q (разрешены буквы, цифры и базовая пунктуация: . , ! ? - ( ) : ;)", r)
+		}
+	}
+	return nil
 }

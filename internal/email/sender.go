@@ -10,11 +10,11 @@ import (
 )
 
 type Sender struct {
-	Host     string // mail.xs-s.ru
+	Host     string // smtp.protonmail.ch
 	Port     string // 465 (SSL/TLS) или 587 (STARTTLS)
-	User     string // mail@xs-s.ru
+	User     string // mail@xstreamka.dev
 	Password string
-	From     string // "VPN Panel <mail@xs-s.ru>"
+	From     string // "XStreamka Dev <mail@xstreamka.dev>"
 }
 
 func NewSender(host, port, user, password, from string) *Sender {

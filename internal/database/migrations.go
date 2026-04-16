@@ -67,21 +67,34 @@ var migrations = []string{
 
 	`CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token) WHERE verify_token IS NOT NULL`,
 
-	// Таблица платежей (пригодится для Robokassa/Enot.io)
-	`CREATE TABLE IF NOT EXISTS payments (
+	// Таблица тарифов — управляется через /admin/tariffs
+	`CREATE TABLE IF NOT EXISTS tariffs (
 		id          SERIAL PRIMARY KEY,
-		user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+		code        VARCHAR(50) UNIQUE NOT NULL,       -- "basic_10" — уходит в pay-service как plan_id
+		label       VARCHAR(100) NOT NULL,             -- UI-название "10 ГБ"
+		description VARCHAR(255) NOT NULL DEFAULT '',  -- в чек Робокассы, только ASCII
 		amount_rub  NUMERIC(10,2) NOT NULL,
-		bytes_added BIGINT NOT NULL,
-		status      VARCHAR(20) NOT NULL DEFAULT 'pending',
-		provider    VARCHAR(50),
-		external_id VARCHAR(255),
+		traffic_gb  NUMERIC(10,2) NOT NULL,
+		is_popular  BOOLEAN DEFAULT FALSE,
+		is_active   BOOLEAN DEFAULT TRUE,
+		sort_order  INTEGER DEFAULT 0,
 		created_at  TIMESTAMPTZ DEFAULT NOW(),
-		completed_at TIMESTAMPTZ
+		updated_at  TIMESTAMPTZ DEFAULT NOW()
 	)`,
 
-	`CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`,
-	`CREATE INDEX IF NOT EXISTS idx_payments_external_id ON payments(external_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_tariffs_active ON tariffs(is_active)`,
+	`CREATE INDEX IF NOT EXISTS idx_tariffs_sort ON tariffs(sort_order)`,
+
+	// Сид стартовых тарифов — только если таблица полностью пустая.
+	// Если админ удалил все тарифы и перезапустил — восстановится; если один из трёх
+	// удалён, seed не сработает, и обратно они не вернутся.
+	`INSERT INTO tariffs (code, label, description, amount_rub, traffic_gb, is_popular, sort_order)
+	 SELECT * FROM (VALUES
+		('basic_10', '10 ГБ',  'VPN Panel 10 GB',  150::numeric, 10::numeric,  FALSE, 10),
+		('plus_30',  '30 ГБ',  'VPN Panel 30 GB',  300::numeric, 30::numeric,  TRUE,  20),
+		('pro_100',  '100 ГБ', 'VPN Panel 100 GB', 700::numeric, 100::numeric, FALSE, 30)
+	 ) AS t(code, label, description, amount_rub, traffic_gb, is_popular, sort_order)
+	 WHERE NOT EXISTS (SELECT 1 FROM tariffs)`,
 }
 
 func (db *DB) Migrate() error {

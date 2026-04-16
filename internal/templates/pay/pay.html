@@ -47,9 +47,9 @@
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 1rem;">
     {{range .Tariffs}}
     <form method="POST" action="/pay/checkout" style="margin: 0;">
-        <input type="hidden" name="plan_id" value="{{.ID}}">
-        <div class="card" style="position: relative; text-align: center; margin: 0; {{if .Popular}}border: 1px solid #3b82f6;{{end}}">
-            {{if .Popular}}
+        <input type="hidden" name="plan_id" value="{{.Code}}">
+        <div class="card" style="position: relative; text-align: center; margin: 0; {{if .IsPopular}}border: 1px solid #3b82f6;{{end}}">
+            {{if .IsPopular}}
                 <div style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: #3b82f6; color: white; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem;">
                     Популярный
                 </div>
@@ -61,7 +61,7 @@
                 без срока годности
             </div>
             <div style="font-size: 1.8rem; font-weight: bold; margin-bottom: 1rem;">
-                {{printf "%.0f" .Amount}} <span style="color: #94a3b8; font-size: 1rem;">₽</span>
+                {{printf "%.0f" .AmountRub}} <span style="color: #94a3b8; font-size: 1rem;">₽</span>
             </div>
             <button type="submit" class="btn btn-primary" style="width: 100%;">Оплатить</button>
         </div>

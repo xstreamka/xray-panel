@@ -41,6 +41,7 @@ func main() {
 
 	userStore := models.NewUserStore(db.Pool)
 	profileStore := models.NewVPNProfileStore(db.Pool)
+	tariffStore := models.NewTariffStore(db.Pool)
 
 	// Генерируем Xray config.json из БД
 	activeUUIDs, err := profileStore.GetAllActiveUUIDs(context.Background())
@@ -93,8 +94,8 @@ func main() {
 	authMW := middleware.NewAuthMiddleware(userStore, cfg.SecretKey)
 	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL)
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, xrayHolder, cfg, renderer)
-	adminHandler := handlers.NewAdminHandler(userStore, profileStore, xrayHolder, renderer)
-	payHandler := handlers.NewPayHandler(renderer, cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret)
+	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, xrayHolder, renderer)
+	payHandler := handlers.NewPayHandler(renderer, tariffStore, cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret)
 
 	// Rate limiter: 5 попыток в минуту на IP
 	loginLimiter := middleware.NewRateLimiter(5, time.Minute)
@@ -150,6 +151,12 @@ func main() {
 			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
 			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
 			r.Post("/admin/users/{id}/balance", adminHandler.AddBalance)
+
+			// Тарифы
+			r.Get("/admin/tariffs", adminHandler.TariffsList)
+			r.Post("/admin/tariffs", adminHandler.TariffCreate)
+			r.Post("/admin/tariffs/{id}", adminHandler.TariffUpdate)
+			r.Post("/admin/tariffs/{id}/delete", adminHandler.TariffDelete)
 		})
 	})
 

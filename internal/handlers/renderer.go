@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
 	"io"
+	"log"
+	"net/http"
 	"path/filepath"
 	"sync"
 )
@@ -60,15 +63,32 @@ func (r *Renderer) loadAll() error {
 	return nil
 }
 
-// Render выполняет шаблон страницы — вызывает "base" как entry point
+// Render выполняет шаблон, пишет в буфер, при ошибке отдаёт 500 и логирует.
+// Если w — http.ResponseWriter, предпочтительнее пользоваться этим методом,
+// потому что частичный HTML клиенту уходить не будет.
 func (r *Renderer) Render(w io.Writer, name string, data any) error {
 	r.mu.RLock()
 	tmpl, ok := r.templates[name]
 	r.mu.RUnlock()
 
 	if !ok {
-		return fmt.Errorf("template %s not found", name)
+		err := fmt.Errorf("template %s not found", name)
+		log.Printf("Renderer: %v", err)
+		if rw, ok := w.(http.ResponseWriter); ok {
+			http.Error(rw, "Internal error", http.StatusInternalServerError)
+		}
+		return err
 	}
 
-	return tmpl.ExecuteTemplate(w, "base", data)
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "base", data); err != nil {
+		log.Printf("Renderer: execute %s failed: %v", name, err)
+		if rw, ok := w.(http.ResponseWriter); ok {
+			http.Error(rw, "Internal error", http.StatusInternalServerError)
+		}
+		return err
+	}
+
+	_, err := buf.WriteTo(w)
+	return err
 }

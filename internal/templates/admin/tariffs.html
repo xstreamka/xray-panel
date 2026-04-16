@@ -1,0 +1,121 @@
+{{template "base" .}}
+
+{{define "title"}}Тарифы — Админка{{end}}
+
+{{define "nav"}}
+<nav>
+    <span class="brand">VPN Panel</span>
+    <div>
+        <a href="/admin">Пользователи</a>
+        <a href="/admin/tariffs">Тарифы</a>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/logout">Выход</a>
+    </div>
+</nav>
+{{end}}
+
+{{define "content"}}
+<h1 style="margin: 1.5rem 0;">Тарифы</h1>
+
+<div class="card">
+    <h3 style="margin-bottom: 0.8rem;">Новый тариф</h3>
+    <form method="POST" action="/admin/tariffs" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; align-items: end;">
+        <div>
+            <label>Код</label>
+            <input type="text" name="code" placeholder="basic_10" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Название</label>
+            <input type="text" name="label" placeholder="10 ГБ" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Описание (ASCII)</label>
+            <input type="text" name="description" placeholder="VPN Panel 10 GB" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Цена ₽</label>
+            <input type="number" step="0.01" min="0" name="amount_rub" placeholder="150" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>ГБ</label>
+            <input type="number" step="0.5" min="0" name="traffic_gb" placeholder="10" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Порядок</label>
+            <input type="number" name="sort_order" value="100" style="margin-bottom: 0;">
+        </div>
+        <div style="display: flex; gap: 0.8rem; align-items: center; padding-bottom: 0.5rem;">
+            <label style="margin: 0; color: #e2e8f0;">
+                <input type="checkbox" name="is_popular"> Популярный
+            </label>
+            <label style="margin: 0; color: #e2e8f0;">
+                <input type="checkbox" name="is_active" checked> Активен
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Создать</button>
+    </form>
+</div>
+
+{{range .Tariffs}}
+<div class="card" {{if not .IsActive}}style="opacity: 0.55;"{{end}}>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
+        <div>
+            <strong style="font-size: 1.1rem;">{{.Label}}</strong>
+            <span style="color: #94a3b8; margin-left: 0.5rem; font-family: monospace;">{{.Code}}</span>
+            {{if .IsPopular}}<span class="badge badge-green">⭐ популярный</span>{{end}}
+            {{if not .IsActive}}<span class="badge badge-red">отключён</span>{{end}}
+        </div>
+        <div style="color: #94a3b8; font-size: 0.85rem;">ID {{.ID}}</div>
+    </div>
+
+    <form method="POST" action="/admin/tariffs/{{.ID}}" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; align-items: end;">
+        <div>
+            <label>Код</label>
+            <input type="text" name="code" value="{{.Code}}" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Название</label>
+            <input type="text" name="label" value="{{.Label}}" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Описание (ASCII)</label>
+            <input type="text" name="description" value="{{.Description}}" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Цена ₽</label>
+            <input type="number" step="0.01" min="0" name="amount_rub" value="{{printf "%.2f" .AmountRub}}" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>ГБ</label>
+            <input type="number" step="0.5" min="0" name="traffic_gb" value="{{printf "%.1f" .TrafficGB}}" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Порядок</label>
+            <input type="number" name="sort_order" value="{{.SortOrder}}" style="margin-bottom: 0;">
+        </div>
+        <div style="display: flex; gap: 0.8rem; align-items: center; padding-bottom: 0.5rem;">
+            <label style="margin: 0; color: #e2e8f0;">
+                <input type="checkbox" name="is_popular" {{if .IsPopular}}checked{{end}}> Популярный
+            </label>
+            <label style="margin: 0; color: #e2e8f0;">
+                <input type="checkbox" name="is_active" {{if .IsActive}}checked{{end}}> Активен
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+    </form>
+
+    <form method="POST" action="/admin/tariffs/{{.ID}}/delete"
+          onsubmit="return confirm('Удалить тариф {{.Code}}? Это необратимо.');"
+          style="margin-top: 0.8rem;">
+        <button type="submit" class="btn btn-sm btn-danger">Удалить</button>
+    </form>
+</div>
+{{end}}
+
+{{if not .Tariffs}}
+<div class="card" style="text-align: center; color: #94a3b8;">
+    Тарифов пока нет. Создай первый в форме выше.
+</div>
+{{end}}
+
+{{end}}
