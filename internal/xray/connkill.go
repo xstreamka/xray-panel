@@ -5,58 +5,40 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
-	"sync"
 
 	statsService "github.com/xtls/xray-core/app/stats/command"
 )
 
-const iptablesChain = "VPN_BLOCK"
-
-// Firewall управляет iptables-правилами для блокировки TCP-соединений.
-// Правила НЕ удаляются автоматически — только при реактивации пользователя.
-type Firewall struct {
-	mu         sync.Mutex
-	blockedIPs map[string][]string // uuid → []ip
-	inited     bool
-}
+// Firewall убивает активные TCP-соединения заблокированных VPN-пользователей.
+//
+// Используем ss -K вместо iptables REJECT:
+//   - ss -K мгновенно убивает существующие соединения (TCP RST)
+//   - НЕ создаёт постоянных правил → не блокирует доступ к веб-панели/лендингу
+//   - Новые VPN-подключения и так не пройдут: RemoveUser удаляет UUID из Xray
+type Firewall struct{}
 
 func NewFirewall() *Firewall {
-	return &Firewall{
-		blockedIPs: make(map[string][]string),
-	}
+	return &Firewall{}
 }
 
-// Init создаёт отдельную iptables chain и подключает к INPUT/OUTPUT.
-// Вызывать один раз при старте.
+// Init очищает legacy iptables chain VPN_BLOCK, если она осталась от старой версии.
 func (f *Firewall) Init() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	// Удаляем ссылки на chain из INPUT/OUTPUT (ошибки игнорируем — может не быть)
+	exec.Command("iptables", "-D", "INPUT", "-j", "VPN_BLOCK").Run()
+	exec.Command("iptables", "-D", "OUTPUT", "-j", "VPN_BLOCK").Run()
 
-	if f.inited {
-		return
-	}
+	// Очищаем и удаляем саму chain
+	exec.Command("iptables", "-F", "VPN_BLOCK").Run()
+	exec.Command("iptables", "-X", "VPN_BLOCK").Run()
 
-	// Создаём chain (игнорируем ошибку если уже есть)
-	exec.Command("iptables", "-N", iptablesChain).Run()
-
-	// Очищаем chain от старых правил (после перезапуска панели)
-	exec.Command("iptables", "-F", iptablesChain).Run()
-
-	// Подключаем chain к INPUT и OUTPUT (если ещё не подключена)
-	// -C проверяет, -A добавляет
-	if exec.Command("iptables", "-C", "INPUT", "-j", iptablesChain).Run() != nil {
-		exec.Command("iptables", "-I", "INPUT", "-j", iptablesChain).Run()
-	}
-	if exec.Command("iptables", "-C", "OUTPUT", "-j", iptablesChain).Run() != nil {
-		exec.Command("iptables", "-I", "OUTPUT", "-j", iptablesChain).Run()
-	}
-
-	f.inited = true
-	log.Printf("Firewall: chain %s initialized", iptablesChain)
+	log.Println("Firewall: initialized (ss -K mode, iptables rules removed)")
 }
 
-// BlockUser добавляет REJECT-правила для всех IP пользователя.
-// TCP RST мгновенно обрывает соединения.
+// BlockUser убивает все активные TCP-соединения пользователя на порту 443.
+//
+// В отличие от iptables REJECT, это одноразовое действие:
+// существующие соединения рвутся, но будущие подключения к веб-панели не блокируются.
+// Защита от новых VPN-сессий обеспечивается вызовом RemoveUser (отдельно).
 func (f *Firewall) BlockUser(ctx context.Context, client *Client, uuid string) int {
 	resp, err := client.stats.GetStatsOnlineIpList(ctx, &statsService.GetStatsRequest{
 		Name: fmt.Sprintf("user>>>%s>>>online", uuid),
@@ -71,59 +53,22 @@ func (f *Firewall) BlockUser(ctx context.Context, client *Client, uuid string) i
 		return 0
 	}
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	blocked := 0
-	var blockedList []string
-
+	killed := 0
 	for ip := range ips {
-		// Блокируем входящие (клиент → сервер:443)
-		inErr := exec.Command("iptables", "-A", iptablesChain,
-			"-s", ip, "-p", "tcp", "--dport", "443",
-			"-j", "REJECT", "--reject-with", "tcp-reset").Run()
-
-		// Блокируем исходящие (сервер:443 → клиент)
-		outErr := exec.Command("iptables", "-A", iptablesChain,
-			"-d", ip, "-p", "tcp", "--sport", "443",
-			"-j", "REJECT", "--reject-with", "tcp-reset").Run()
-
-		if inErr == nil && outErr == nil {
-			blocked++
-			blockedList = append(blockedList, ip)
-			log.Printf("Firewall: blocked %s for user %s", ip, uuid)
+		// ss -K убивает TCP-сокеты по фильтру: src IP + dport 443
+		err := exec.Command("ss", "-K", "src", ip, "dport", "=", "443").Run()
+		if err != nil {
+			log.Printf("Firewall: ss -K failed for %s: %v", ip, err)
+			continue
 		}
+		killed++
+		log.Printf("Firewall: killed connections from %s for user %s", ip, uuid)
 	}
 
-	if len(blockedList) > 0 {
-		f.blockedIPs[uuid] = blockedList
-	}
-
-	return blocked
+	return killed
 }
 
-// UnblockUser удаляет все REJECT-правила для пользователя.
-// Вызывать при реактивации (admin toggle, traffic reset).
+// UnblockUser — no-op: ss -K не создаёт постоянных правил, чистить нечего.
 func (f *Firewall) UnblockUser(uuid string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	ips, ok := f.blockedIPs[uuid]
-	if !ok {
-		return
-	}
-
-	for _, ip := range ips {
-		exec.Command("iptables", "-D", iptablesChain,
-			"-s", ip, "-p", "tcp", "--dport", "443",
-			"-j", "REJECT", "--reject-with", "tcp-reset").Run()
-
-		exec.Command("iptables", "-D", iptablesChain,
-			"-d", ip, "-p", "tcp", "--sport", "443",
-			"-j", "REJECT", "--reject-with", "tcp-reset").Run()
-
-		log.Printf("Firewall: unblocked %s for user %s", ip, uuid)
-	}
-
-	delete(f.blockedIPs, uuid)
+	// Ничего делать не нужно — постоянных блокировок нет.
 }
