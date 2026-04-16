@@ -52,6 +52,10 @@ type Config struct {
 
 	// Путь к xray config.json (в shared volume)
 	XrayConfigPath string
+
+	// Pay Service — интеграция с xstreamka.dev/pay-service
+	PayServiceURL string // например https://xstreamka.dev
+	WebhookSecret string // общий секрет с pay-service
 }
 
 func Load() (*Config, error) {
@@ -93,6 +97,9 @@ func Load() (*Config, error) {
 		AmsterdamShortID:   getEnv("AMSTERDAM_SHORT_ID", ""),
 
 		XrayConfigPath: getEnv("XRAY_CONFIG_PATH", "/etc/xray/config.json"),
+
+		PayServiceURL: getEnv("PAY_SERVICE_URL", ""),
+		WebhookSecret: getEnv("WEBHOOK_SECRET", ""),
 	}
 
 	if cfg.SecretKey == "" {

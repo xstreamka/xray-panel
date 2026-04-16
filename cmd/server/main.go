@@ -94,6 +94,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL)
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, xrayHolder, renderer)
+	payHandler := handlers.NewPayHandler(renderer, cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret)
 
 	// Rate limiter: 5 попыток в минуту на IP
 	loginLimiter := middleware.NewRateLimiter(5, time.Minute)
@@ -135,6 +136,10 @@ func main() {
 		r.Get("/dashboard/stats", dashHandler.StatsJSON)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
 		r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
+
+		// Оплата (редирект на pay-service)
+		r.Get("/pay", payHandler.Index)
+		r.Post("/pay/checkout", payHandler.Checkout)
 
 		// Админка
 		r.Group(func(r chi.Router) {

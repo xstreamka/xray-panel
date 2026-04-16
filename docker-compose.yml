@@ -68,6 +68,8 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASSWORD: ${SMTP_PASSWORD}
       SMTP_FROM: ${SMTP_FROM}
+      PAY_SERVICE_URL: ${PAY_SERVICE_URL:-}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
     volumes:
       - xray-config:/etc/xray
       - xray-logs:/var/log/xray
