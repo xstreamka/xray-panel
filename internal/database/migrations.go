@@ -95,6 +95,22 @@ var migrations = []string{
 		('pro_100',  '100 ГБ', 'VPN Panel 100 GB', 700::numeric, 100::numeric, FALSE, 30)
 	 ) AS t(code, label, description, amount_rub, traffic_gb, is_popular, sort_order)
 	 WHERE NOT EXISTS (SELECT 1 FROM tariffs)`,
+
+	// Квитанции об оплате — идемпотентность webhook + аудит пополнений
+	`CREATE TABLE IF NOT EXISTS payment_receipts (
+		id             SERIAL PRIMARY KEY,
+		inv_id         INTEGER UNIQUE NOT NULL,             -- из pay-service
+		user_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+		plan_id        VARCHAR(50) NOT NULL,                -- tariffs.code на момент оплаты
+		amount_rub     NUMERIC(10,2) NOT NULL,
+		traffic_bytes  BIGINT NOT NULL,                     -- сколько начислено
+		paid_at        TIMESTAMPTZ NOT NULL,
+		raw_payload    JSONB NOT NULL,                      -- сырой JSON от pay-service
+		created_at     TIMESTAMPTZ DEFAULT NOW()
+	)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_payment_receipts_user_id ON payment_receipts(user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_payment_receipts_created_at ON payment_receipts(created_at DESC)`,
 }
 
 func (db *DB) Migrate() error {

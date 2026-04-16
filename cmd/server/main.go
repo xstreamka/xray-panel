@@ -42,6 +42,7 @@ func main() {
 	userStore := models.NewUserStore(db.Pool)
 	profileStore := models.NewVPNProfileStore(db.Pool)
 	tariffStore := models.NewTariffStore(db.Pool)
+	receiptStore := models.NewPaymentReceiptStore(db.Pool)
 
 	// Генерируем Xray config.json из БД
 	activeUUIDs, err := profileStore.GetAllActiveUUIDs(context.Background())
@@ -95,7 +96,10 @@ func main() {
 	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL)
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, xrayHolder, renderer)
-	payHandler := handlers.NewPayHandler(renderer, tariffStore, cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret)
+	payHandler := handlers.NewPayHandler(
+		renderer, tariffStore, receiptStore,
+		cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret,
+	)
 
 	// Rate limiter: 5 попыток в минуту на IP
 	loginLimiter := middleware.NewRateLimiter(5, time.Minute)
@@ -120,6 +124,8 @@ func main() {
 	r.With(loginLimiter.Middleware).Post("/register", authHandler.Register)
 	r.Get("/verify", authHandler.VerifyEmail) // GET /verify?token=xxx
 	r.Get("/logout", authHandler.Logout)
+	// Webhook от pay-service (защищён HMAC-подписью, не сессией)
+	r.Post("/api/payments/webhook", payHandler.Webhook)
 
 	// Роуты для залогиненных, но НЕ обязательно верифицированных
 	r.Group(func(r chi.Router) {
