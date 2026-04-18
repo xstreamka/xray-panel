@@ -362,7 +362,7 @@ func formatBytesGo(b int64) string {
 
 func (h *DashboardHandler) buildVlessURI(userUUID, name string) string {
 	return fmt.Sprintf(
-		"vless://%s@%s:%s?type=tcp&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s#%s",
+		"vless://%s@%s:%s?type=tcp&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&flow=xtls-rprx-vision#%s",
 		userUUID,
 		h.cfg.ServerAddr,
 		h.cfg.ServerPort,
