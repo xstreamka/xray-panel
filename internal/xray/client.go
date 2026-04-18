@@ -49,11 +49,16 @@ func (c *Client) Close() {
 	}
 }
 
-// AddUser добавляет пользователя в Xray inbound (VLESS)
+// AddUser добавляет пользователя в Xray inbound (VLESS с Vision).
+//
+// ВНИМАНИЕ про статистику:
+// Flow xtls-rprx-vision использует splice — stats-счётчики показывают
+// только control-пакеты, а не реальный объём трафика. Для точного учёта
+// использовать внешние механизмы (nftables counters по UID Xray).
 func (c *Client) AddUser(ctx context.Context, uuid string, email string) error {
 	account := serial.ToTypedMessage(&vless.Account{
-		Id: uuid,
-		// Flow убран — без splice трафик считается в реальном времени
+		Id:   uuid,
+		Flow: "xtls-rprx-vision",
 	})
 
 	resp, err := c.handler.AlterInbound(ctx, &handlerService.AlterInboundRequest{
@@ -69,7 +74,6 @@ func (c *Client) AddUser(ctx context.Context, uuid string, email string) error {
 	if err != nil {
 		return fmt.Errorf("add user %s: %w", email, err)
 	}
-
 	log.Printf("Xray: user added: %s (resp: %v)", email, resp)
 	return nil
 }

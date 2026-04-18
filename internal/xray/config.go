@@ -8,31 +8,39 @@ import (
 	"xray-panel/internal/config"
 )
 
-// GenerateConfig создаёт config.json для Xray с включённым API, stats и policy
+// GenerateConfig создаёт config.json для Xray с включённым API, stats и policy.
+// Базируется на проверенном вручную рабочем конфиге (5.178.85.153 → Amsterdam).
+//
+// ВАЖНО про статистику:
+// Flow xtls-rprx-vision использует splice (sendfile в ядре), из-за чего
+// stats-счётчики пользователей недосчитывают значительную часть трафика —
+// через userspace проходят только control-пакеты. Это компромисс ради
+// скорости и обхода DPI. Для точного биллинга использовать nftables counters.
 func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string) error {
 	// Пустой clients — пользователями управляем исключительно через gRPC API
 	// (syncUsersToXray добавляет активных при старте через AddUser).
 	// Это критично: RemoveUser работает ТОЛЬКО для API-добавленных пользователей,
 	// статических из конфига оно не трогает!
 	clients := []map[string]any{}
-	_ = activeUUIDs // используются только для логирования в main.g
+	_ = activeUUIDs // используются только для логирования в main.go
 	for _, uuid := range activeUUIDs {
 		clients = append(clients, map[string]any{
 			"id":    uuid,
 			"email": uuid,
+			"flow":  "xtls-rprx-vision",
 		})
 	}
 
 	xrayConfig := map[string]any{
-		// Логирование — видим какой outbound выбран для каждого запроса
+		// Логирование
 		"log": map[string]any{
 			"loglevel": "warning",
 			"access":   "/var/log/xray/access.log",
 			"error":    "/var/log/xray/error.log",
 		},
 
-		// DNS — Xray резолвит домены сам для routing
-		// Без этой секции IPIfNonMatch не работает!
+		// DNS — Xray резолвит домены сам для routing.
+		// Без этой секции IPIfNonMatch не работает корректно.
 		"dns": map[string]any{
 			"servers": []any{
 				// РФ домены через Яндекс DNS
@@ -91,7 +99,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 				},
 			},
 			{
-				"tag":      cfg.XrayInboundTag,
+				"tag":      cfg.XrayInboundTag, // "vless-in"
 				"listen":   "0.0.0.0",
 				"port":     443,
 				"protocol": "vless",
@@ -103,9 +111,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"network":  "tcp",
 					"security": "reality",
 					"realitySettings": map[string]any{
-						"show":        false,
 						"dest":        cfg.RealityDest,
-						"xver":        0,
 						"serverNames": cfg.RealityServerNames,
 						"privateKey":  cfg.RealityPrivateKey,
 						"shortIds":    []string{cfg.RealityShortID},
@@ -114,16 +120,16 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 				"sniffing": map[string]any{
 					"enabled":      true,
 					"destOverride": []string{"http", "tls", "quic"},
-					"routeOnly":    true, // только для роутинга, не трогаем destination
+					"routeOnly":    true, // только для роутинга, destination не подменяем (важно для Vision)
 				},
 			},
 		},
 
 		// Outbounds
 		"outbounds": []map[string]any{
-			// Амстердам — default (первый)
+			// Амстердам — зарубежное ходит сюда
 			{
-				"tag":      "proxy-out",
+				"tag":      "proxy",
 				"protocol": "vless",
 				"settings": map[string]any{
 					"vnext": []map[string]any{
@@ -133,6 +139,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 							"users": []map[string]any{
 								{
 									"id":         cfg.AmsterdamUUID,
+									"flow":       "xtls-rprx-vision",
 									"encryption": "none",
 								},
 							},
@@ -150,7 +157,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					},
 				},
 			},
-			// Direct — выход с ЯО
+			// Direct — выход с этого сервера (РФ)
 			{
 				"tag":      "direct",
 				"protocol": "freedom",
@@ -162,16 +169,23 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 
 		// Routing
 		"routing": map[string]any{
-			"domainStrategy": "IPIfNonMatch",
 			"domainMatcher":  "hybrid",
+			"domainStrategy": "IPIfNonMatch",
 			"rules": []map[string]any{
-				// 1. API
+				// 1. Анти-петля: dial до самого Амстердама всегда direct,
+				//    иначе outbound proxy попадёт сам в себя.
+				{
+					"type":        "field",
+					"ip":          []string{cfg.AmsterdamAddr},
+					"outboundTag": "direct",
+				},
+				// 2. API
 				{
 					"type":        "field",
 					"inboundTag":  []string{"api-in"},
 					"outboundTag": "api",
 				},
-				// 2. РФ домены → direct
+				// 3. РФ домены → direct
 				{
 					"type": "field",
 					"domain": []string{
@@ -196,23 +210,23 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					},
 					"outboundTag": "direct",
 				},
-				// 3. РФ IP → direct (подстраховка через IPIfNonMatch)
+				// 4. РФ IP → direct (подстраховка через IPIfNonMatch)
 				{
 					"type":        "field",
 					"ip":          []string{"geoip:ru"},
 					"outboundTag": "direct",
 				},
-				// 4. Приватные сети
+				// 5. Приватные сети
 				{
 					"type":        "field",
 					"ip":          []string{"geoip:private"},
 					"outboundTag": "direct",
 				},
-				// 5. Всё остальное → Амстердам
+				// 6. Всё остальное с vless-in → Амстердам
 				{
 					"type":        "field",
 					"inboundTag":  []string{cfg.XrayInboundTag},
-					"outboundTag": "proxy-out",
+					"outboundTag": "proxy",
 				},
 			},
 		},
@@ -224,7 +238,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 	}
 
 	// Создаём директорию для логов (не критично если не получится)
-	os.MkdirAll("/var/log/xray", 0755)
+	_ = os.MkdirAll("/var/log/xray", 0755)
 
 	if err := os.WriteFile(outputPath, data, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)
