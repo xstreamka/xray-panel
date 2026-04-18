@@ -84,7 +84,7 @@ func Load() (*Config, error) {
 		ServerPort:     getEnv("SERVER_PORT", "443"),
 
 		RealityDest:        getEnv("REALITY_DEST", "www.google.com:443"),
-		RealityServerNames: splitCSV(getEnv("REALITY_SERVER_NAME", "xstreamka.dev")),
+		RealityServerNames: parseServerNames(getEnv("REALITY_SERVER_NAME", "")),
 		RealityPrivateKey:  getEnv("REALITY_PRIVATE_KEY", ""),
 		RealityPublicKey:   getEnv("REALITY_PUBLIC_KEY", ""),
 		RealityShortID:     getEnv("REALITY_SHORT_ID", ""),
@@ -156,4 +156,14 @@ func splitCSV(s string) []string {
 		}
 	}
 	return result
+}
+
+// parseServerNames: если SNI пустой — возвращаем [""], чтобы Xray принял
+// пустой Client Hello SNI, а buildVlessURI не паниковал на [0].
+func parseServerNames(s string) []string {
+	parts := splitCSV(s)
+	if len(parts) == 0 {
+		return []string{""}
+	}
+	return parts
 }
