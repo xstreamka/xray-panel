@@ -138,6 +138,7 @@ function showQR(btn) {
         text: btn.dataset.uri,
         width: 280,
         height: 280,
+        correctLevel: QRCode.CorrectLevel.L
     });
     modal.style.display = 'flex';
 }
