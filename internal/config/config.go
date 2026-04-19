@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -36,11 +35,11 @@ type Config struct {
 	ServerPort     string // внешний порт (443)
 
 	// Reality (ЯО inbound)
-	RealityDest        string
-	RealityServerNames []string
-	RealityPrivateKey  string
-	RealityPublicKey   string
-	RealityShortID     string
+	RealityDest       string
+	RealityServerName string
+	RealityPrivateKey string
+	RealityPublicKey  string
+	RealityShortID    string
 
 	// Амстердам (outbound)
 	AmsterdamAddr      string
@@ -83,11 +82,11 @@ func Load() (*Config, error) {
 		ServerAddr:     getEnv("SERVER_ADDR", ""),
 		ServerPort:     getEnv("SERVER_PORT", "443"),
 
-		RealityDest:        getEnv("REALITY_DEST", "www.google.com:443"),
-		RealityServerNames: parseServerNames(getEnv("REALITY_SERVER_NAME", "")),
-		RealityPrivateKey:  getEnv("REALITY_PRIVATE_KEY", ""),
-		RealityPublicKey:   getEnv("REALITY_PUBLIC_KEY", ""),
-		RealityShortID:     getEnv("REALITY_SHORT_ID", ""),
+		RealityDest:       getEnv("REALITY_DEST", "www.google.com:443"),
+		RealityServerName: getEnv("REALITY_SERVER_NAME", ""),
+		RealityPrivateKey: getEnv("REALITY_PRIVATE_KEY", ""),
+		RealityPublicKey:  getEnv("REALITY_PUBLIC_KEY", ""),
+		RealityShortID:    getEnv("REALITY_SHORT_ID", ""),
 
 		AmsterdamAddr:      getEnv("AMSTERDAM_ADDR", ""),
 		AmsterdamPort:      getEnvInt("AMSTERDAM_PORT", 443),
@@ -144,26 +143,4 @@ func getEnvInt(key string, fallback int) int {
 		}
 	}
 	return fallback
-}
-
-func splitCSV(s string) []string {
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
-}
-
-// parseServerNames: если SNI пустой — возвращаем [""], чтобы Xray принял
-// пустой Client Hello SNI, а buildVlessURI не паниковал на [0].
-func parseServerNames(s string) []string {
-	parts := splitCSV(s)
-	if len(parts) == 0 {
-		return []string{""}
-	}
-	return parts
 }
