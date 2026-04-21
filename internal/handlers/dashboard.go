@@ -366,7 +366,7 @@ func (h *DashboardHandler) buildVlessURI(userUUID, name string) string {
 		userUUID,
 		h.cfg.ServerAddr,
 		h.cfg.ServerPort,
-		h.cfg.RealityServerName,
+		"9.9.9.9", // костыль вместо h.cfg.RealityServerName
 		h.cfg.RealityPublicKey,
 		h.cfg.RealityShortID,
 		name,
