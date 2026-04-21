@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -366,7 +367,7 @@ func (h *DashboardHandler) buildVlessURI(userUUID, name string) string {
 		userUUID,
 		h.cfg.ServerAddr,
 		h.cfg.ServerPort,
-		"9.9.9.9", // костыль вместо h.cfg.RealityServerName
+		cmp.Or(h.cfg.RealityServerName, "9.9.9.9"),
 		h.cfg.RealityPublicKey,
 		h.cfg.RealityShortID,
 		name,
