@@ -35,7 +35,7 @@ type StatsCollector struct {
 	uuidToUserMu sync.RWMutex
 
 	// disabledUsers — юзеры, чей баланс уже исчерпан в этом цикле enforcement.
-	// Чтобы не спамить DeductTraffic и disconnectUserAll в каждом тике
+	// Чтобы не спамить DeductTraffic и DisconnectUserAll в каждом тике
 	// до ближайшей ресинхронизации.
 	disabledUsers   map[int]bool
 	disabledUsersMu sync.Mutex
@@ -235,7 +235,7 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 			continue
 		}
 		if remaining <= 0 {
-			s.disconnectUserAll(ctx, uid, "balance exhausted")
+			s.DisconnectUserAll(ctx, uid, "balance exhausted")
 			s.disabledUsersMu.Lock()
 			s.disabledUsers[uid] = true
 			s.disabledUsersMu.Unlock()
@@ -253,10 +253,11 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 	}
 }
 
-// disconnectUserAll отключает все профили юзера по user_id:
+// DisconnectUserAll отключает все профили юзера по user_id:
 // блокирует TCP всех его UUID, удаляет из Xray, снимает is_active в БД.
 // Используется, когда баланс подписки исчерпан или истёк срок подписки.
-func (s *StatsCollector) disconnectUserAll(ctx context.Context, userID int, reason string) {
+// Экспортирован, чтобы подписочный воркер мог вызывать на истёкших юзерах.
+func (s *StatsCollector) DisconnectUserAll(ctx context.Context, userID int, reason string) {
 	profiles, err := s.profiles.GetByUserID(ctx, userID)
 	if err != nil {
 		log.Printf("Enforce: GetByUserID %d: %v", userID, err)

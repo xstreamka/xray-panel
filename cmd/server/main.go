@@ -17,6 +17,7 @@ import (
 	"xray-panel/internal/handlers"
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
+	"xray-panel/internal/subscription"
 	"xray-panel/internal/xray"
 
 	"github.com/go-chi/chi/v5"
@@ -71,6 +72,9 @@ func main() {
 	} else {
 		log.Println("SMTP not configured — verification links will be logged to console")
 	}
+
+	subWorker := subscription.NewWorker(userStore, profileStore, mailer, xrayHolder, cfg.BaseURL)
+	go subWorker.Run(ctx)
 
 	// Шаблоны
 	funcMap := template.FuncMap{

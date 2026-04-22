@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/smtp"
 	"strings"
+	"time"
 )
 
 type Sender struct {
@@ -67,6 +68,34 @@ func (s *Sender) SendTopupNotification(to, username string, trafficGB, amountRub
 
 —
 VPN Panel`, username, invID, amountRub, trafficGB, dashURL)
+
+	return s.send(to, subject, body)
+}
+
+// SendExpirationReminder — напоминание о скором истечении подписки.
+// daysLeft — за сколько дней шлём (5 или 1), expiresAt — точная дата окончания.
+func (s *Sender) SendExpirationReminder(to, username string, daysLeft int, expiresAt time.Time, baseURL string) error {
+	payURL := strings.TrimRight(baseURL, "/") + "/pay"
+
+	var subject, when string
+	switch daysLeft {
+	case 1:
+		subject = "Подписка закончится завтра — VPN Panel"
+		when = "завтра"
+	default:
+		subject = fmt.Sprintf("Подписка закончится через %d дней — VPN Panel", daysLeft)
+		when = fmt.Sprintf("через %d дней", daysLeft)
+	}
+
+	body := fmt.Sprintf(`Привет, %s!
+
+Ваша подписка истекает %s (%s).
+
+Чтобы не потерять доступ к VPN, продлите подписку заранее:
+%s
+
+—
+VPN Panel`, username, when, expiresAt.Format("02.01.2006 15:04"), payURL)
 
 	return s.send(to, subject, body)
 }
