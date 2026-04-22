@@ -61,7 +61,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go connectXray(ctx, cfg, xrayHolder, profileStore)
+	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore)
 
 	// Email sender (nil если SMTP не настроен)
 	var mailer *email.Sender
@@ -189,7 +189,13 @@ func main() {
 	}
 }
 
-func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, profiles *models.VPNProfileStore) {
+func connectXray(
+	ctx context.Context,
+	cfg *config.Config,
+	holder *xray.Holder,
+	profiles *models.VPNProfileStore,
+	users *models.UserStore,
+) {
 	firewall := xray.NewFirewall()
 	firewall.Init()
 	holder.SetFirewall(firewall)
@@ -212,7 +218,7 @@ func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, p
 
 		syncUsersToXray(ctx, client, profiles)
 
-		collector := xray.NewStatsCollector(client, profiles, firewall)
+		collector := xray.NewStatsCollector(client, profiles, users, firewall)
 		collector.InitCumulative(ctx)
 		holder.SetCollector(collector)
 		collector.Run(ctx)

@@ -12,6 +12,7 @@ import (
 type StatsCollector struct {
 	client   *Client
 	profiles *models.VPNProfileStore
+	users    *models.UserStore
 	firewall *Firewall
 
 	// pending хранит трафик, который не удалось записать в БД
@@ -22,9 +23,22 @@ type StatsCollector struct {
 	cumulative   map[string]int64
 	cumulativeMu sync.Mutex
 
-	// Лимиты в памяти — чтобы не дёргать БД на каждую проверку
+	// Лимиты в памяти — чтобы не дёргать БД на каждую проверку.
+	// Это personal-лимит на профиль (пользовательская фича),
+	// НЕ общий лимит подписки — тот считается на уровне user.
 	limits   map[string]int64 // uuid → traffic_limit (0 = без лимита)
 	limitsMu sync.RWMutex
+
+	// Мэппинг UUID профиля → user_id владельца.
+	// Нужен для агрегации дельт трафика по юзеру и вызова DeductTraffic.
+	uuidToUser   map[string]int
+	uuidToUserMu sync.RWMutex
+
+	// disabledUsers — юзеры, чей баланс уже исчерпан в этом цикле enforcement.
+	// Чтобы не спамить DeductTraffic и disconnectUserAll в каждом тике
+	// до ближайшей ресинхронизации.
+	disabledUsers   map[int]bool
+	disabledUsersMu sync.Mutex
 
 	// Кэш для HTTP-хендлеров
 	snapMu        sync.RWMutex
@@ -35,14 +49,22 @@ type StatsCollector struct {
 	lastFullEnforce time.Time
 }
 
-func NewStatsCollector(client *Client, profiles *models.VPNProfileStore, firewall *Firewall) *StatsCollector {
+func NewStatsCollector(
+	client *Client,
+	profiles *models.VPNProfileStore,
+	users *models.UserStore,
+	firewall *Firewall,
+) *StatsCollector {
 	return &StatsCollector{
-		client:     client,
-		profiles:   profiles,
-		firewall:   firewall,
-		pending:    make(map[string][2]int64),
-		cumulative: make(map[string]int64),
-		limits:     make(map[string]int64),
+		client:        client,
+		profiles:      profiles,
+		users:         users,
+		firewall:      firewall,
+		pending:       make(map[string][2]int64),
+		cumulative:    make(map[string]int64),
+		limits:        make(map[string]int64),
+		uuidToUser:    make(map[string]int),
+		disabledUsers: make(map[int]bool),
 	}
 }
 
@@ -59,6 +81,8 @@ func (s *StatsCollector) Snapshot() (
 
 // InitCumulative загружает текущий трафик и лимиты из БД в память.
 // Вызывать при старте и периодически для ресинхронизации.
+// Также сбрасывает disabledUsers: следующий цикл перепроверит баланс юзера,
+// и если он был пополнен — spam DeductTraffic возобновится штатно.
 func (s *StatsCollector) InitCumulative(ctx context.Context) {
 	profiles, err := s.profiles.ListAll(ctx)
 	if err != nil {
@@ -68,14 +92,22 @@ func (s *StatsCollector) InitCumulative(ctx context.Context) {
 
 	s.cumulativeMu.Lock()
 	s.limitsMu.Lock()
+	s.uuidToUserMu.Lock()
 
+	clear(s.uuidToUser)
 	for _, p := range profiles {
 		s.cumulative[p.UUID] = p.TrafficUp + p.TrafficDown
 		s.limits[p.UUID] = p.TrafficLimit
+		s.uuidToUser[p.UUID] = p.UserID
 	}
 
+	s.uuidToUserMu.Unlock()
 	s.limitsMu.Unlock()
 	s.cumulativeMu.Unlock()
+
+	s.disabledUsersMu.Lock()
+	clear(s.disabledUsers)
+	s.disabledUsersMu.Unlock()
 
 	log.Printf("Stats: cumulative initialized for %d profiles", len(profiles))
 }
@@ -141,6 +173,9 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 	s.lastTraffic = traffic
 	s.snapMu.Unlock()
 
+	// Агрегация дельт по user_id для списания с подписочного баланса.
+	byUser := make(map[int]int64)
+
 	updated := 0
 	for uuid, stats := range traffic {
 		up, down := stats[0], stats[1]
@@ -156,7 +191,7 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 		currentTotal := s.cumulative[uuid]
 		s.cumulativeMu.Unlock()
 
-		// 2. Проверяем лимит по памяти — без единого запроса к БД
+		// 2. Проверяем personal-лимит профиля (пользовательская фича)
 		s.limitsMu.RLock()
 		limit := s.limits[uuid]
 		s.limitsMu.RUnlock()
@@ -165,13 +200,46 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 			s.disconnectUser(ctx, uuid, currentTotal, limit)
 		}
 
-		// 3. Пишем в БД
+		// 3. Копим дельту в байтах для списания с баланса юзера
+		s.uuidToUserMu.RLock()
+		if uid, ok := s.uuidToUser[uuid]; ok {
+			byUser[uid] += delta
+		}
+		s.uuidToUserMu.RUnlock()
+
+		// 4. Пишем per-profile статистику в БД (для отображения)
 		if err := s.profiles.UpdateTraffic(ctx, uuid, up, down); err != nil {
 			log.Printf("Stats update error for %s: %v — will retry", uuid, err)
 			s.pending[uuid] = [2]int64{up, down}
 			continue
 		}
 		updated++
+	}
+
+	// Списываем суммарные дельты с подписочного баланса юзеров.
+	// Если баланс исчерпан — отключаем все профили юзера разом.
+	for uid, sum := range byUser {
+		if sum <= 0 {
+			continue
+		}
+		s.disabledUsersMu.Lock()
+		skip := s.disabledUsers[uid]
+		s.disabledUsersMu.Unlock()
+		if skip {
+			continue
+		}
+
+		remaining, err := s.users.DeductTraffic(ctx, uid, sum)
+		if err != nil {
+			log.Printf("Stats: DeductTraffic user=%d delta=%d: %v", uid, sum, err)
+			continue
+		}
+		if remaining <= 0 {
+			s.disconnectUserAll(ctx, uid, "balance exhausted")
+			s.disabledUsersMu.Lock()
+			s.disabledUsers[uid] = true
+			s.disabledUsersMu.Unlock()
+		}
 	}
 
 	if updated > 0 {
@@ -185,7 +253,44 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 	}
 }
 
-// disconnectUser отключает пользователя: блокирует TCP через iptables, удаляет из Xray, деактивирует в БД
+// disconnectUserAll отключает все профили юзера по user_id:
+// блокирует TCP всех его UUID, удаляет из Xray, снимает is_active в БД.
+// Используется, когда баланс подписки исчерпан или истёк срок подписки.
+func (s *StatsCollector) disconnectUserAll(ctx context.Context, userID int, reason string) {
+	profiles, err := s.profiles.GetByUserID(ctx, userID)
+	if err != nil {
+		log.Printf("Enforce: GetByUserID %d: %v", userID, err)
+		return
+	}
+
+	blocked := 0
+	for _, p := range profiles {
+		if !p.IsActive {
+			continue
+		}
+		blocked += s.firewall.BlockUser(ctx, s.client, p.UUID)
+		if err := s.client.RemoveUser(ctx, p.UUID); err != nil {
+			log.Printf("Enforce: RemoveUser %s: %v (may be already removed)", p.UUID, err)
+		}
+		// Обнулим personal-лимит в кэше, чтобы per-profile enforcement не гонялся
+		// повторно — записи оживут при ресинхронизации InitCumulative.
+		s.limitsMu.Lock()
+		s.limits[p.UUID] = 0
+		s.limitsMu.Unlock()
+	}
+
+	uuids, err := s.profiles.DeactivateAllByUser(ctx, userID)
+	if err != nil {
+		log.Printf("Enforce: DeactivateAllByUser %d: %v", userID, err)
+		return
+	}
+
+	log.Printf("Enforce: user=%d disabled (%s) — %d profiles, %d IPs blocked",
+		userID, reason, len(uuids), blocked)
+}
+
+// disconnectUser отключает ОДИН профиль по personal-лимиту (пользовательская фича).
+// Это не связано с балансом подписки — только с лимитом конкретного профиля.
 func (s *StatsCollector) disconnectUser(ctx context.Context, uuid string, total, limit int64) {
 	// Сразу обнуляем лимит в кэше, чтобы следующие циклы не спамили повторными попытками
 	s.limitsMu.Lock()
