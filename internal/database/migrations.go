@@ -135,6 +135,15 @@ END $$`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS base_traffic_used BIGINT NOT NULL DEFAULT 0`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_traffic_balance BIGINT NOT NULL DEFAULT 0`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS frozen_extra_balance BIGINT NOT NULL DEFAULT 0`,
+	// extra_traffic_granted — исходный объём extra в текущем цикле подписки.
+	// Нужен, чтобы считать «потрачено из extra» для прогресс-бара.
+	// += при каждом пополнении (addon-платёж, админский set), сбрасывается при
+	// продлении подписки (→ размороженный frozen), обнуляется при истечении.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_traffic_granted BIGINT NOT NULL DEFAULT 0`,
+	// На существующих юзерах синхронизируем granted = текущий balance
+	// (считаем что весь имеющийся extra «свежевыдан»).
+	`UPDATE users SET extra_traffic_granted = extra_traffic_balance
+	 WHERE extra_traffic_granted = 0 AND extra_traffic_balance > 0`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_5d_sent_at TIMESTAMPTZ`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_1d_sent_at TIMESTAMPTZ`,
 

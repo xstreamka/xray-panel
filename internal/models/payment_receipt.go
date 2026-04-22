@@ -87,6 +87,7 @@ func (s *PaymentReceiptStore) ApplyPayment(
 			    base_traffic_limit    = $3,
 			    base_traffic_used     = 0,
 			    extra_traffic_balance = extra_traffic_balance + frozen_extra_balance,
+			    extra_traffic_granted = extra_traffic_balance + frozen_extra_balance,
 			    frozen_extra_balance  = 0,
 			    reminder_5d_sent_at   = NULL,
 			    reminder_1d_sent_at   = NULL,
@@ -105,6 +106,7 @@ func (s *PaymentReceiptStore) ApplyPayment(
 		ct, err := tx.Exec(ctx,
 			`UPDATE users SET
 			    extra_traffic_balance = extra_traffic_balance + $1,
+			    extra_traffic_granted = extra_traffic_granted + $1,
 			    updated_at = NOW()
 			 WHERE id = $2`,
 			r.TrafficBytes, r.UserID,

@@ -32,6 +32,7 @@ type User struct {
 	BaseTrafficLimit    int64      `json:"base_traffic_limit"`
 	BaseTrafficUsed     int64      `json:"base_traffic_used"`
 	ExtraTrafficBalance int64      `json:"extra_traffic_balance"`
+	ExtraTrafficGranted int64      `json:"extra_traffic_granted"`
 	FrozenExtraBalance  int64      `json:"frozen_extra_balance"`
 	Reminder5dSentAt    *time.Time `json:"-"`
 	Reminder1dSentAt    *time.Time `json:"-"`
@@ -67,7 +68,7 @@ func NewUserStore(pool *pgxpool.Pool) *UserStore {
 const userCols = `id, username, email, is_admin, is_active, email_verified,
                   current_tariff_id, tariff_expires_at,
                   base_traffic_limit, base_traffic_used,
-                  extra_traffic_balance, frozen_extra_balance,
+                  extra_traffic_balance, extra_traffic_granted, frozen_extra_balance,
                   reminder_5d_sent_at, reminder_1d_sent_at,
                   created_at, updated_at`
 
@@ -78,7 +79,7 @@ func scanUser(row interface {
 		&u.ID, &u.Username, &u.Email, &u.IsAdmin, &u.IsActive, &u.EmailVerified,
 		&u.CurrentTariffID, &u.TariffExpiresAt,
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
-		&u.ExtraTrafficBalance, &u.FrozenExtraBalance,
+		&u.ExtraTrafficBalance, &u.ExtraTrafficGranted, &u.FrozenExtraBalance,
 		&u.Reminder5dSentAt, &u.Reminder1dSentAt,
 		&u.CreatedAt, &u.UpdatedAt,
 	)
@@ -129,7 +130,7 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 		&u.ID, &u.Username, &u.Email, &u.IsAdmin, &u.IsActive, &u.EmailVerified,
 		&u.CurrentTariffID, &u.TariffExpiresAt,
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
-		&u.ExtraTrafficBalance, &u.FrozenExtraBalance,
+		&u.ExtraTrafficBalance, &u.ExtraTrafficGranted, &u.FrozenExtraBalance,
 		&u.Reminder5dSentAt, &u.Reminder1dSentAt,
 		&u.CreatedAt, &u.UpdatedAt,
 		&u.PasswordHash,
@@ -235,6 +236,7 @@ func (s *UserStore) RenewSubscription(
 		    base_traffic_limit    = $3,
 		    base_traffic_used     = 0,
 		    extra_traffic_balance = extra_traffic_balance + frozen_extra_balance,
+		    extra_traffic_granted = extra_traffic_balance + frozen_extra_balance,
 		    frozen_extra_balance  = 0,
 		    reminder_5d_sent_at   = NULL,
 		    reminder_1d_sent_at   = NULL,
@@ -250,13 +252,16 @@ func (s *UserStore) RenewSubscription(
 }
 
 // AddExtra добавляет байты к активному extra-балансу (addon-тариф или подарок от админа).
+// Также увеличивает granted — «сколько было выдано в этом цикле» — для прогресс-бара.
 func (s *UserStore) AddExtra(ctx context.Context, userID int, bytes int64) error {
 	if bytes <= 0 {
 		return nil
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users
-		 SET extra_traffic_balance = extra_traffic_balance + $1, updated_at = NOW()
+		 SET extra_traffic_balance = extra_traffic_balance + $1,
+		     extra_traffic_granted = extra_traffic_granted + $1,
+		     updated_at = NOW()
 		 WHERE id = $2`,
 		bytes, userID,
 	)
@@ -271,14 +276,16 @@ func (s *UserStore) AddExtra(ctx context.Context, userID int, bytes int64) error
 
 // SetExtra жёстко устанавливает extra_traffic_balance заданному значению.
 // Административный инструмент для ручной коррекции: +X, -X или полный сброс.
-// Отрицательные значения не допускаются (на уровне параметра).
+// granted синхронизируется с новым значением — бар стартует с «100% осталось».
 func (s *UserStore) SetExtra(ctx context.Context, userID int, bytes int64) error {
 	if bytes < 0 {
 		bytes = 0
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users
-		 SET extra_traffic_balance = $1, updated_at = NOW()
+		 SET extra_traffic_balance = $1,
+		     extra_traffic_granted = $1,
+		     updated_at = NOW()
 		 WHERE id = $2`,
 		bytes, userID,
 	)
@@ -363,6 +370,7 @@ func (s *UserStore) ExpireSubscriptions(ctx context.Context) ([]int, error) {
 		`UPDATE users SET
 		    frozen_extra_balance  = frozen_extra_balance + extra_traffic_balance,
 		    extra_traffic_balance = 0,
+		    extra_traffic_granted = 0,
 		    base_traffic_limit    = 0,
 		    base_traffic_used     = 0,
 		    current_tariff_id     = NULL,

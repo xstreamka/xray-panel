@@ -180,6 +180,21 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		basePercent = int(float64(used) / float64(user.BaseTrafficLimit) * 100)
 	}
 
+	// extra: сколько потрачено из выданного за текущий цикл.
+	// granted фиксируется при каждом пополнении, balance уменьшается при списании.
+	extraUsed := user.ExtraTrafficGranted - user.ExtraTrafficBalance
+	if extraUsed < 0 {
+		extraUsed = 0
+	}
+	var extraPercent int
+	if user.ExtraTrafficGranted > 0 {
+		used := extraUsed
+		if used > user.ExtraTrafficGranted {
+			used = user.ExtraTrafficGranted
+		}
+		extraPercent = int(float64(used) / float64(user.ExtraTrafficGranted) * 100)
+	}
+
 	var daysLeft int
 	if user.TariffExpiresAt != nil {
 		d := time.Until(*user.TariffExpiresAt).Hours() / 24
@@ -194,6 +209,8 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		"TariffLabel":    tariffLabel,
 		"BaseRemaining":  baseRemaining,
 		"BasePercent":    basePercent,
+		"ExtraUsed":      extraUsed,
+		"ExtraPercent":   extraPercent,
 		"DaysLeft":       daysLeft,
 		"HasActiveSub":   user.HasActiveSubscription(),
 		"TotalAvailable": user.TotalAvailable(),
@@ -341,6 +358,10 @@ type dashStatsJSON struct {
 	BaseRemainingFmt string `json:"base_remaining_fmt"`
 	ExtraBalance     int64  `json:"extra_balance"`
 	ExtraBalanceFmt  string `json:"extra_balance_fmt"`
+	ExtraGranted     int64  `json:"extra_granted"`
+	ExtraGrantedFmt  string `json:"extra_granted_fmt"`
+	ExtraUsed        int64  `json:"extra_used"`
+	ExtraUsedFmt     string `json:"extra_used_fmt"`
 	FrozenBalance    int64  `json:"frozen_balance"`
 	FrozenBalanceFmt string `json:"frozen_balance_fmt"`
 	// Подписка
@@ -442,6 +463,10 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		BaseRemainingFmt: formatBytesGo(baseRem),
 		ExtraBalance:     user.ExtraTrafficBalance,
 		ExtraBalanceFmt:  formatBytesGo(user.ExtraTrafficBalance),
+		ExtraGranted:     user.ExtraTrafficGranted,
+		ExtraGrantedFmt:  formatBytesGo(user.ExtraTrafficGranted),
+		ExtraUsed:        max(0, user.ExtraTrafficGranted-user.ExtraTrafficBalance),
+		ExtraUsedFmt:     formatBytesGo(max(0, user.ExtraTrafficGranted-user.ExtraTrafficBalance)),
 		FrozenBalance:    user.FrozenExtraBalance,
 		FrozenBalanceFmt: formatBytesGo(user.FrozenExtraBalance),
 		TariffLabel:      tariffLabel,

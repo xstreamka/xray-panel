@@ -59,6 +59,16 @@
     </div>
     {{end}}
 
+    <div data-stat="extra-row" style="margin-top: 0.8rem; {{if le .User.ExtraTrafficGranted 0}}display: none;{{end}}">
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
+            <span>Докупленный трафик</span>
+            <span><strong style="color: #e2e8f0;" data-stat="extra-used">{{formatBytes .ExtraUsed}}</strong> / <span data-stat="extra-granted">{{formatBytes .User.ExtraTrafficGranted}}</span></span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 6px; overflow: hidden;">
+            <div data-stat="extra-bar" style="background: {{if ge .ExtraPercent 90}}#ef4444{{else if ge .ExtraPercent 70}}#f59e0b{{else}}#fcd34d{{end}}; width: {{.ExtraPercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+        </div>
+    </div>
+
     <div style="display: flex; gap: 1.2rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #334155; flex-wrap: wrap; font-size: 0.9rem;">
         <div>
             <div style="color: #94a3b8; font-size: 0.8rem;">Всего доступно</div>
@@ -259,6 +269,21 @@ function refreshStats() {
                 const pct = Math.round(used / data.base_limit * 100);
                 baseBar.style.width = pct + '%';
                 baseBar.style.background = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#22c55e';
+            }
+
+            // Прогресс-бар докупленного трафика
+            const extraRow = document.querySelector('[data-stat="extra-row"]');
+            const extraUsedEl = document.querySelector('[data-stat="extra-used"]');
+            const extraGrantedEl = document.querySelector('[data-stat="extra-granted"]');
+            const extraBar = document.querySelector('[data-stat="extra-bar"]');
+            if (extraRow) extraRow.style.display = data.extra_granted > 0 ? '' : 'none';
+            if (extraUsedEl) extraUsedEl.textContent = data.extra_used_fmt;
+            if (extraGrantedEl) extraGrantedEl.textContent = data.extra_granted_fmt;
+            if (extraBar && data.extra_granted > 0) {
+                const capped = Math.min(data.extra_used || 0, data.extra_granted);
+                const pct = Math.round(capped / data.extra_granted * 100);
+                extraBar.style.width = pct + '%';
+                extraBar.style.background = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#fcd34d';
             }
 
             // Extra / Frozen блоки
