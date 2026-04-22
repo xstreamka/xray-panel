@@ -374,9 +374,43 @@ func (h *PayHandler) History(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Мапим код тарифа → человекочитаемое название. Если тариф с момента оплаты
+	// был удалён из БД — fallback на сам код в шаблоне.
+	allTariffs, _ := h.tariffs.ListAll(r.Context())
+	labels := make(map[string]string, len(allTariffs))
+	for _, t := range allTariffs {
+		labels[t.Code] = t.Label
+	}
+
+	// Сводка: количество и сумма по видам.
+	var subCount, addonCount int
+	var subRub, addonRub float64
+	var subBytes, addonBytes int64
+	for _, rr := range receipts {
+		switch rr.TariffKind {
+		case models.TariffKindSubscription:
+			subCount++
+			subRub += rr.AmountRub
+			subBytes += rr.TrafficBytes
+		case models.TariffKindAddon:
+			addonCount++
+			addonRub += rr.AmountRub
+			addonBytes += rr.TrafficBytes
+		}
+	}
+
 	h.renderer.Render(w, "payments_history.html", map[string]any{
-		"User":     user,
-		"Receipts": receipts,
+		"User":         user,
+		"Receipts":     receipts,
+		"Labels":       labels,
+		"SubCount":     subCount,
+		"SubRub":       subRub,
+		"SubBytes":     subBytes,
+		"AddonCount":   addonCount,
+		"AddonRub":     addonRub,
+		"AddonBytes":   addonBytes,
+		"TotalRub":     subRub + addonRub,
+		"TotalCount":   subCount + addonCount,
 	})
 }
 
