@@ -288,9 +288,9 @@ func (s *UserStore) SetExtra(ctx context.Context, userID int, bytes int64) error
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users
-		 SET extra_traffic_balance = $1,
-		     extra_traffic_granted = $1,
-		     block_notified_at     = CASE WHEN $1 > 0 THEN NULL ELSE block_notified_at END,
+		 SET extra_traffic_balance = $1::bigint,
+		     extra_traffic_granted = $1::bigint,
+		     block_notified_at     = CASE WHEN $1::bigint > 0 THEN NULL ELSE block_notified_at END,
 		     updated_at = NOW()
 		 WHERE id = $2`,
 		bytes, userID,
