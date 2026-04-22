@@ -253,6 +253,54 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 	}
 }
 
+// ReactivateUserAll включает все профили юзера обратно: снимает is_active=false
+// в БД, добавляет UUID в Xray, восстанавливает кэши (uuidToUser, limits) и
+// снимает пометку disabledUsers. Вызывать после успешной оплаты подписки/аддона
+// или админского пополнения баланса. Если профили уже активны — no-op.
+func (s *StatsCollector) ReactivateUserAll(ctx context.Context, userID int) {
+	// Снимаем флаг сразу — следующий тик collectAndEnforce увидит
+	// свежий баланс и начнёт списывать штатно.
+	s.disabledUsersMu.Lock()
+	delete(s.disabledUsers, userID)
+	s.disabledUsersMu.Unlock()
+
+	profiles, err := s.profiles.GetByUserID(ctx, userID)
+	if err != nil {
+		log.Printf("Reactivate: GetByUserID %d: %v", userID, err)
+		return
+	}
+
+	// Обновим кэши для ВСЕХ профилей юзера (в т.ч. уже активных — на случай,
+	// если их personal-лимит изменили).
+	s.uuidToUserMu.Lock()
+	s.limitsMu.Lock()
+	for _, p := range profiles {
+		s.uuidToUser[p.UUID] = p.UserID
+		s.limits[p.UUID] = p.TrafficLimit
+	}
+	s.limitsMu.Unlock()
+	s.uuidToUserMu.Unlock()
+
+	uuids, err := s.profiles.ReactivateAllByUser(ctx, userID)
+	if err != nil {
+		log.Printf("Reactivate: ReactivateAllByUser %d: %v", userID, err)
+		return
+	}
+	if len(uuids) == 0 {
+		return
+	}
+
+	added := 0
+	for _, uuid := range uuids {
+		if err := s.client.AddUser(ctx, uuid, uuid); err != nil {
+			log.Printf("Reactivate: AddUser %s: %v", uuid, err)
+			continue
+		}
+		added++
+	}
+	log.Printf("Reactivate: user=%d — %d/%d profiles returned to Xray", userID, added, len(uuids))
+}
+
 // DisconnectUserAll отключает все профили юзера по user_id:
 // блокирует TCP всех его UUID, удаляет из Xray, снимает is_active в БД.
 // Используется, когда баланс подписки исчерпан или истёк срок подписки.

@@ -258,6 +258,10 @@ func (h *AdminHandler) AddBalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.ReactivateUserAll(r.Context(), userID)
+	}
+
 	log.Printf("Admin: added %.1f GB to user %d", addGB, userID)
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
