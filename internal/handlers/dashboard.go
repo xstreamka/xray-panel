@@ -171,11 +171,47 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		baseRemaining = 0
 	}
 
+	var basePercent int
+	if user.BaseTrafficLimit > 0 {
+		used := user.BaseTrafficUsed
+		if used > user.BaseTrafficLimit {
+			used = user.BaseTrafficLimit
+		}
+		basePercent = int(float64(used) / float64(user.BaseTrafficLimit) * 100)
+	}
+
+	// extra: сколько потрачено из выданного за текущий цикл.
+	// granted фиксируется при каждом пополнении, balance уменьшается при списании.
+	extraUsed := user.ExtraTrafficGranted - user.ExtraTrafficBalance
+	if extraUsed < 0 {
+		extraUsed = 0
+	}
+	var extraPercent int
+	if user.ExtraTrafficGranted > 0 {
+		used := extraUsed
+		if used > user.ExtraTrafficGranted {
+			used = user.ExtraTrafficGranted
+		}
+		extraPercent = int(float64(used) / float64(user.ExtraTrafficGranted) * 100)
+	}
+
+	var daysLeft int
+	if user.TariffExpiresAt != nil {
+		d := time.Until(*user.TariffExpiresAt).Hours() / 24
+		if d > 0 {
+			daysLeft = int(d) + 1
+		}
+	}
+
 	h.renderer.Render(w, "dashboard.html", map[string]any{
 		"User":           user,
 		"Profiles":       views,
 		"TariffLabel":    tariffLabel,
 		"BaseRemaining":  baseRemaining,
+		"BasePercent":    basePercent,
+		"ExtraUsed":      extraUsed,
+		"ExtraPercent":   extraPercent,
+		"DaysLeft":       daysLeft,
 		"HasActiveSub":   user.HasActiveSubscription(),
 		"TotalAvailable": user.TotalAvailable(),
 	})
@@ -242,6 +278,186 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 		collector.RegisterProfile(newUUID, user.ID, limitBytes)
 	}
 
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// SetProfileLimit — POST /dashboard/profiles/{id}/limit — юзер сам задаёт
+// или меняет personal-лимит своего профиля (0 = безлимит, трафик списывается
+// только из общего подписочного пула).
+func (h *DashboardHandler) SetProfileLimit(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	limitGB, err := strconv.ParseFloat(strings.TrimSpace(r.FormValue("limit_gb")), 64)
+	if err != nil || limitGB < 0 {
+		http.Error(w, "Некорректное значение лимита", http.StatusBadRequest)
+		return
+	}
+	limitBytes := int64(limitGB * 1024 * 1024 * 1024)
+
+	// Проверка ownership: юзер может менять только свои профили.
+	profile, err := h.profiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		return
+	}
+
+	if err := h.profiles.SetLimit(r.Context(), id, limitBytes); err != nil {
+		log.Printf("Dashboard: set limit error profile=%d user=%d: %v", id, user.ID, err)
+		http.Error(w, "Ошибка сохранения", http.StatusInternalServerError)
+		return
+	}
+
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.UpdateLimit(profile.UUID, limitBytes)
+	}
+
+	// Если профиль был отключён из-за превышения personal-лимита, и новый
+	// лимит больше уже накопленного трафика (или 0 = безлимит) — реактивируем.
+	// Коллектор сам проверит user-баланс и отключит снова, если тот исчерпан.
+	if !profile.IsActive {
+		totalTraffic := profile.TrafficUp + profile.TrafficDown
+		canActivate := limitBytes == 0 || totalTraffic < limitBytes
+		if canActivate {
+			h.reactivateProfile(r.Context(), profile, limitBytes)
+		}
+	}
+
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// ToggleProfile — POST /dashboard/profiles/{id}/toggle — юзер сам включает
+// или выключает свой профиль. Выключенный профиль остаётся в БД с is_active=false;
+// URI для него не принимается Xray (юзер удалён из inbound). Статистика
+// трафика сохраняется — после включения будет продолжаться с того же числа.
+//
+// Форма передаёт action=activate или action=deactivate.
+// При активации проверяется personal-лимит: если TrafficLimit>0 и уже превышен,
+// просим юзера сначала сменить лимит. User-баланс здесь не проверяется —
+// коллектор отсечёт профиль в ближайшем тике, если баланс 0.
+func (h *DashboardHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	profile, err := h.profiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		return
+	}
+
+	switch r.FormValue("action") {
+	case "activate":
+		if profile.IsActive {
+			http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+			return
+		}
+		if profile.TrafficLimit > 0 && profile.TrafficUp+profile.TrafficDown >= profile.TrafficLimit {
+			http.Error(w,
+				"Лимит устройства превышен. Увеличьте лимит или поставьте 0 (безлимит) и повторите.",
+				http.StatusBadRequest)
+			return
+		}
+		h.reactivateProfile(r.Context(), profile, profile.TrafficLimit)
+
+	case "deactivate":
+		if !profile.IsActive {
+			http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+			return
+		}
+		h.deactivateProfile(r.Context(), profile)
+
+	default:
+		http.Error(w, "Unknown action", http.StatusBadRequest)
+		return
+	}
+
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// reactivateProfile возвращает один профиль в работу: is_active=true в БД,
+// AddUser в Xray, обновление personal-лимита в кэше коллектора.
+// Не отвечает за проверку условий — это делает вызывающий код.
+func (h *DashboardHandler) reactivateProfile(ctx context.Context, p *models.VPNProfile, limitBytes int64) {
+	if err := h.profiles.SetActive(ctx, p.ID, true); err != nil {
+		log.Printf("Dashboard: reactivate SetActive profile=%d: %v", p.ID, err)
+		return
+	}
+	if client := h.xrayHolder.Get(); client != nil {
+		if err := client.AddUser(ctx, p.UUID, p.UUID); err != nil {
+			log.Printf("Dashboard: reactivate AddUser profile=%d: %v", p.ID, err)
+		}
+	}
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.RegisterProfile(p.UUID, p.UserID, limitBytes)
+	}
+	log.Printf("Dashboard: profile %s reactivated by user", p.UUID)
+}
+
+// deactivateProfile снимает is_active в БД, убивает активные соединения
+// через ss-K и удаляет UUID из Xray, чтобы никто не мог переподключиться.
+// Статистика трафика на профиле сохраняется.
+func (h *DashboardHandler) deactivateProfile(ctx context.Context, p *models.VPNProfile) {
+	if err := h.profiles.SetActive(ctx, p.ID, false); err != nil {
+		log.Printf("Dashboard: deactivate SetActive profile=%d: %v", p.ID, err)
+		return
+	}
+	if client := h.xrayHolder.Get(); client != nil {
+		if fw := h.xrayHolder.GetFirewall(); fw != nil {
+			fw.BlockUser(ctx, client, p.UUID)
+		}
+		if err := client.RemoveUser(ctx, p.UUID); err != nil {
+			log.Printf("Dashboard: deactivate RemoveUser profile=%d: %v", p.ID, err)
+		}
+	}
+	log.Printf("Dashboard: profile %s deactivated by user", p.UUID)
+}
+
+// ResetProfileTraffic — POST /dashboard/profiles/{id}/reset — обнуляет
+// trafic_up / traffic_down профиля. Юзерская фича «чистый старт» для
+// устройств, у которых исчерпан personal-лимит. Общий подписочный баланс
+// юзера не трогает — он считается централизованно в user-модели.
+// Если профиль был отключён по personal-лимиту — реактивируем.
+func (h *DashboardHandler) ResetProfileTraffic(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	profile, err := h.profiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		return
+	}
+
+	if err := h.profiles.ResetTraffic(r.Context(), id); err != nil {
+		log.Printf("Dashboard: reset traffic profile=%d: %v", id, err)
+		http.Error(w, "Ошибка сброса", http.StatusInternalServerError)
+		return
+	}
+
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.ResetCumulative(profile.UUID)
+	}
+
+	if !profile.IsActive {
+		h.reactivateProfile(r.Context(), profile, profile.TrafficLimit)
+	}
+
+	log.Printf("Dashboard: profile %s traffic reset by user", profile.UUID)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -322,10 +538,16 @@ type dashStatsJSON struct {
 	BaseRemainingFmt string `json:"base_remaining_fmt"`
 	ExtraBalance     int64  `json:"extra_balance"`
 	ExtraBalanceFmt  string `json:"extra_balance_fmt"`
+	ExtraGranted     int64  `json:"extra_granted"`
+	ExtraGrantedFmt  string `json:"extra_granted_fmt"`
+	ExtraUsed        int64  `json:"extra_used"`
+	ExtraUsedFmt     string `json:"extra_used_fmt"`
 	FrozenBalance    int64  `json:"frozen_balance"`
 	FrozenBalanceFmt string `json:"frozen_balance_fmt"`
 	// Подписка
+	TariffLabel     string     `json:"tariff_label"`
 	TariffExpiresAt *time.Time `json:"tariff_expires_at"`
+	DaysLeft        int        `json:"days_left"`
 	HasActiveSub    bool       `json:"has_active_subscription"`
 
 	Profiles []profileStatsJSON `json:"profiles"`
@@ -395,6 +617,21 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		profileStats = append(profileStats, s)
 	}
 
+	var tariffLabel string
+	if user.CurrentTariffID != nil {
+		if t, err := h.tariffs.GetByID(r.Context(), *user.CurrentTariffID); err == nil {
+			tariffLabel = t.Label
+		}
+	}
+
+	var daysLeft int
+	if user.TariffExpiresAt != nil {
+		d := time.Until(*user.TariffExpiresAt).Hours() / 24
+		if d > 0 {
+			daysLeft = int(d) + 1 // округляем вверх: "осталось 3 дня", даже если это 2.1
+		}
+	}
+
 	result := dashStatsJSON{
 		Balance:          total,
 		BalanceFmt:       formatBytesGo(total),
@@ -406,9 +643,15 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		BaseRemainingFmt: formatBytesGo(baseRem),
 		ExtraBalance:     user.ExtraTrafficBalance,
 		ExtraBalanceFmt:  formatBytesGo(user.ExtraTrafficBalance),
+		ExtraGranted:     user.ExtraTrafficGranted,
+		ExtraGrantedFmt:  formatBytesGo(user.ExtraTrafficGranted),
+		ExtraUsed:        max(0, user.ExtraTrafficGranted-user.ExtraTrafficBalance),
+		ExtraUsedFmt:     formatBytesGo(max(0, user.ExtraTrafficGranted-user.ExtraTrafficBalance)),
 		FrozenBalance:    user.FrozenExtraBalance,
 		FrozenBalanceFmt: formatBytesGo(user.FrozenExtraBalance),
+		TariffLabel:      tariffLabel,
 		TariffExpiresAt:  user.TariffExpiresAt,
+		DaysLeft:         daysLeft,
 		HasActiveSub:     user.HasActiveSubscription(),
 		Profiles:         profileStats,
 	}

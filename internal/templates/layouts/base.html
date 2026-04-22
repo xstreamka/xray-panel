@@ -20,12 +20,33 @@
         .btn-primary:hover { background: #2563eb; }
         .btn-danger { background: #ef4444; color: white; }
         .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
-        input[type="text"], input[type="email"], input[type="password"] {
-            width: 100%; padding: 0.6rem; border: 1px solid #334155; border-radius: 6px;
-            background: #0f172a; color: #e2e8f0; margin-bottom: 0.8rem; font-size: 1rem;
+        input[type="text"], input[type="email"], input[type="password"],
+        input[type="number"], select, textarea {
+            width: 100%; padding: 0.55rem 0.7rem; border: 1px solid #334155; border-radius: 6px;
+            background: #0f172a; color: #e2e8f0; font-size: 0.95rem; font-family: inherit;
+            margin-bottom: 0.8rem;
         }
-        input:focus { outline: none; border-color: #3b82f6; }
-        label { display: block; margin-bottom: 0.3rem; color: #94a3b8; font-size: 0.9rem; }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #3b82f6; }
+        select {
+            appearance: none; -webkit-appearance: none;
+            background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%2394a3b8' d='M6 8L0 0h12z'/></svg>");
+            background-repeat: no-repeat; background-position: right 0.7rem center;
+            padding-right: 2rem;
+        }
+        input[type="checkbox"] { accent-color: #3b82f6; width: auto; margin: 0; }
+        label { display: block; margin-bottom: 0.3rem; color: #94a3b8; font-size: 0.85rem; }
+
+        /* Сетка полей формы: автоматические колонки, общий отступ */
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.8rem 1rem; }
+        .form-grid .field { margin: 0; }
+        .form-grid .field input, .form-grid .field select { margin-bottom: 0; }
+        .form-grid .field-check {
+            display: flex; gap: 0.4rem; align-items: center; color: #e2e8f0;
+            font-size: 0.9rem; padding-top: 1.3rem;
+        }
+        .form-grid .field-check label { margin: 0; color: inherit; font-size: inherit; }
+        .form-actions { display: flex; gap: 0.6rem; margin-top: 1rem; align-items: center; flex-wrap: wrap; }
+        .form-actions .spacer { flex: 1; }
         .error { background: #7f1d1d; color: #fca5a5; padding: 0.8rem; border-radius: 6px; margin-bottom: 1rem; }
         .uri-box { background: #0f172a; padding: 0.6rem; border-radius: 4px; word-break: break-all; font-family: monospace; font-size: 0.8rem; margin-top: 0.5rem; }
         .stats { display: flex; gap: 1rem; margin-top: 0.5rem; }
@@ -35,6 +56,7 @@
         .badge-blue { background: #1e3a5f; color: #60a5fa; }
         .badge-gray { background: #475569; color: #94a3b8; }
         .badge-red { background: #7f1d1d; color: #fca5a5; }
+        .badge-yellow { background: #713f12; color: #fcd34d; }
         table { width: 100%; border-collapse: collapse; }
         th, td { text-align: left; padding: 0.6rem; border-bottom: 1px solid #334155; }
         th { color: #94a3b8; font-size: 0.85rem; }

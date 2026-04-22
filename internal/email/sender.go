@@ -100,6 +100,43 @@ VPN Panel`, username, when, expiresAt.Format("02.01.2006 15:04"), payURL)
 	return s.send(to, subject, body)
 }
 
+// SendBlockNotification — уведомление об отключении VPN-профилей.
+// reason: "balance" (исчерпан трафик) или "expired" (истёк срок подписки).
+func (s *Sender) SendBlockNotification(to, username, reason, baseURL string) error {
+	payURL := strings.TrimRight(baseURL, "/") + "/pay"
+
+	var subject, body string
+	switch reason {
+	case "expired":
+		subject = "Подписка истекла — VPN отключён"
+		body = fmt.Sprintf(`Привет, %s!
+
+Срок вашей подписки истёк, VPN-профили отключены.
+
+Докупленный трафик сохранён и вернётся при следующей оплате подписки.
+
+Чтобы восстановить доступ — оформите подписку заново:
+%s
+
+—
+VPN Panel`, username, payURL)
+
+	default: // "balance"
+		subject = "Трафик закончился — VPN отключён"
+		body = fmt.Sprintf(`Привет, %s!
+
+Базовый трафик подписки исчерпан и весь докупленный тоже, VPN-профили отключены.
+
+Чтобы восстановить доступ — докупите трафик или оформите новый тариф:
+%s
+
+—
+VPN Panel`, username, payURL)
+	}
+
+	return s.send(to, subject, body)
+}
+
 func (s *Sender) send(to, subject, body string) error {
 	msg := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n%s",

@@ -26,26 +26,25 @@ type User struct {
 	VerifyToken   *string    `json:"-"`
 	VerifyExpires *time.Time `json:"-"`
 
-	// Legacy: оставлена на время миграции, в новом коде не использовать.
-	// Все данные уже перенесены в ExtraTrafficBalance при миграции.
-	TrafficBalance int64 `json:"-"`
-
 	// ===== Подписочная модель =====
 	CurrentTariffID     *int       `json:"current_tariff_id"`
 	TariffExpiresAt     *time.Time `json:"tariff_expires_at"`
 	BaseTrafficLimit    int64      `json:"base_traffic_limit"`
 	BaseTrafficUsed     int64      `json:"base_traffic_used"`
 	ExtraTrafficBalance int64      `json:"extra_traffic_balance"`
+	ExtraTrafficGranted int64      `json:"extra_traffic_granted"`
 	FrozenExtraBalance  int64      `json:"frozen_extra_balance"`
 	Reminder5dSentAt    *time.Time `json:"-"`
 	Reminder1dSentAt    *time.Time `json:"-"`
+	BlockNotifiedAt     *time.Time `json:"-"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TotalAvailable — сколько трафика осталось списать (room в base + extra).
-func (u *User) TotalAvailable() int64 {
+// Value-receiver, чтобы html/template мог вызвать метод на embedded-значении.
+func (u User) TotalAvailable() int64 {
 	room := u.BaseTrafficLimit - u.BaseTrafficUsed
 	if room < 0 {
 		room = 0
@@ -54,7 +53,7 @@ func (u *User) TotalAvailable() int64 {
 }
 
 // HasActiveSubscription — есть ли активный тариф по дате.
-func (u *User) HasActiveSubscription() bool {
+func (u User) HasActiveSubscription() bool {
 	return u.TariffExpiresAt != nil && u.TariffExpiresAt.After(time.Now())
 }
 
@@ -68,11 +67,10 @@ func NewUserStore(pool *pgxpool.Pool) *UserStore {
 
 // userCols — единый список полей в нужном порядке, чтобы не дублировать SELECT-ы.
 const userCols = `id, username, email, is_admin, is_active, email_verified,
-                  traffic_balance,
                   current_tariff_id, tariff_expires_at,
                   base_traffic_limit, base_traffic_used,
-                  extra_traffic_balance, frozen_extra_balance,
-                  reminder_5d_sent_at, reminder_1d_sent_at,
+                  extra_traffic_balance, extra_traffic_granted, frozen_extra_balance,
+                  reminder_5d_sent_at, reminder_1d_sent_at, block_notified_at,
                   created_at, updated_at`
 
 func scanUser(row interface {
@@ -80,11 +78,10 @@ func scanUser(row interface {
 }, u *User) error {
 	return row.Scan(
 		&u.ID, &u.Username, &u.Email, &u.IsAdmin, &u.IsActive, &u.EmailVerified,
-		&u.TrafficBalance,
 		&u.CurrentTariffID, &u.TariffExpiresAt,
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
-		&u.ExtraTrafficBalance, &u.FrozenExtraBalance,
-		&u.Reminder5dSentAt, &u.Reminder1dSentAt,
+		&u.ExtraTrafficBalance, &u.ExtraTrafficGranted, &u.FrozenExtraBalance,
+		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
 		&u.CreatedAt, &u.UpdatedAt,
 	)
 }
@@ -132,11 +129,10 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 		username,
 	).Scan(
 		&u.ID, &u.Username, &u.Email, &u.IsAdmin, &u.IsActive, &u.EmailVerified,
-		&u.TrafficBalance,
 		&u.CurrentTariffID, &u.TariffExpiresAt,
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
-		&u.ExtraTrafficBalance, &u.FrozenExtraBalance,
-		&u.Reminder5dSentAt, &u.Reminder1dSentAt,
+		&u.ExtraTrafficBalance, &u.ExtraTrafficGranted, &u.FrozenExtraBalance,
+		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
 		&u.CreatedAt, &u.UpdatedAt,
 		&u.PasswordHash,
 	)
@@ -241,9 +237,11 @@ func (s *UserStore) RenewSubscription(
 		    base_traffic_limit    = $3,
 		    base_traffic_used     = 0,
 		    extra_traffic_balance = extra_traffic_balance + frozen_extra_balance,
+		    extra_traffic_granted = extra_traffic_balance + frozen_extra_balance,
 		    frozen_extra_balance  = 0,
 		    reminder_5d_sent_at   = NULL,
 		    reminder_1d_sent_at   = NULL,
+		    block_notified_at     = NULL,
 		    updated_at = NOW()
 		 WHERE id = $4
 		 RETURNING `+userCols,
@@ -256,15 +254,88 @@ func (s *UserStore) RenewSubscription(
 }
 
 // AddExtra добавляет байты к активному extra-балансу (addon-тариф или подарок от админа).
+// Также увеличивает granted — «сколько было выдано в этом цикле» — для прогресс-бара.
+// Сбрасывает block_notified_at, чтобы при следующем исчерпании юзер получил письмо.
 func (s *UserStore) AddExtra(ctx context.Context, userID int, bytes int64) error {
 	if bytes <= 0 {
 		return nil
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users
-		 SET extra_traffic_balance = extra_traffic_balance + $1, updated_at = NOW()
+		 SET extra_traffic_balance = extra_traffic_balance + $1,
+		     extra_traffic_granted = extra_traffic_granted + $1,
+		     block_notified_at     = NULL,
+		     updated_at = NOW()
 		 WHERE id = $2`,
 		bytes, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
+}
+
+// SetExtra жёстко устанавливает extra_traffic_balance заданному значению.
+// Административный инструмент для ручной коррекции: +X, -X или полный сброс.
+// granted синхронизируется с новым значением — бар стартует с «100% осталось».
+// block_notified_at сбрасываем только если выдали трафик (bytes > 0).
+func (s *UserStore) SetExtra(ctx context.Context, userID int, bytes int64) error {
+	if bytes < 0 {
+		bytes = 0
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users
+		 SET extra_traffic_balance = $1::bigint,
+		     extra_traffic_granted = $1::bigint,
+		     block_notified_at     = CASE WHEN $1::bigint > 0 THEN NULL ELSE block_notified_at END,
+		     updated_at = NOW()
+		 WHERE id = $2`,
+		bytes, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
+}
+
+// TryMarkBlockNotified атомарно ставит block_notified_at = NOW(), если он
+// ещё NULL, и возвращает true. Если уже был проставлен — возвращает false,
+// и вызывающий код должен пропустить отправку письма. Сбрасывается при
+// любом пополнении (AddExtra/SetExtra/RenewSubscription/ApplyPayment).
+func (s *UserStore) TryMarkBlockNotified(ctx context.Context, userID int) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET block_notified_at = NOW(), updated_at = NOW()
+		 WHERE id = $1 AND block_notified_at IS NULL`,
+		userID,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// CancelSubscription обнуляет подписку юзера (но не трогает extra/frozen).
+// Профили отключатся автоматически в ближайшем тике stats-коллектора по
+// критерию TotalAvailable <= 0, если base исчерпан. Для немедленного отключения
+// вызывающий код должен сам дёрнуть DisconnectUserAll.
+func (s *UserStore) CancelSubscription(ctx context.Context, userID int) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET
+		    current_tariff_id   = NULL,
+		    tariff_expires_at   = NULL,
+		    base_traffic_limit  = 0,
+		    base_traffic_used   = 0,
+		    reminder_5d_sent_at = NULL,
+		    reminder_1d_sent_at = NULL,
+		    updated_at          = NOW()
+		 WHERE id = $1`,
+		userID,
 	)
 	if err != nil {
 		return err
@@ -321,6 +392,7 @@ func (s *UserStore) ExpireSubscriptions(ctx context.Context) ([]int, error) {
 		`UPDATE users SET
 		    frozen_extra_balance  = frozen_extra_balance + extra_traffic_balance,
 		    extra_traffic_balance = 0,
+		    extra_traffic_granted = 0,
 		    base_traffic_limit    = 0,
 		    base_traffic_used     = 0,
 		    current_tariff_id     = NULL,
@@ -397,25 +469,3 @@ func (s *UserStore) MarkReminderSent(ctx context.Context, userID int, days int) 
 	return err
 }
 
-// ──────────────────────────────────────────────
-//  Admin / legacy
-// ──────────────────────────────────────────────
-
-// AddBalance — используется админкой для "подарка" трафика.
-// В новой модели подарок идёт в extra_traffic_balance.
-// Имя сохранено для обратной совместимости с handlers/admin.go.
-func (s *UserStore) AddBalance(ctx context.Context, userID int, bytes int64) error {
-	return s.AddExtra(ctx, userID, bytes)
-}
-
-// GetBalance — возвращает ТОТАЛ доступного трафика (base room + extra).
-// Используется в старых местах, где хотели "сколько осталось".
-func (s *UserStore) GetBalance(ctx context.Context, userID int) (int64, error) {
-	var remaining int64
-	err := s.pool.QueryRow(ctx,
-		`SELECT (base_traffic_limit - base_traffic_used) + extra_traffic_balance
-		 FROM users WHERE id = $1`,
-		userID,
-	).Scan(&remaining)
-	return remaining, err
-}

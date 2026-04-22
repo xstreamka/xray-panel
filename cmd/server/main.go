@@ -59,11 +59,6 @@ func main() {
 
 	xrayHolder := xray.NewHolder()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore)
-
 	// Email sender (nil если SMTP не настроен)
 	var mailer *email.Sender
 	if cfg.SMTPConfigured() {
@@ -72,6 +67,11 @@ func main() {
 	} else {
 		log.Println("SMTP not configured — verification links will be logged to console")
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore, mailer, cfg.BaseURL)
 
 	subWorker := subscription.NewWorker(userStore, profileStore, mailer, xrayHolder, cfg.BaseURL)
 	go subWorker.Run(ctx)
@@ -146,6 +146,9 @@ func main() {
 		r.Get("/dashboard", dashHandler.Index)
 		r.Get("/dashboard/stats", dashHandler.StatsJSON)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
+		r.Post("/dashboard/profiles/{id}/limit", dashHandler.SetProfileLimit)
+		r.Post("/dashboard/profiles/{id}/toggle", dashHandler.ToggleProfile)
+		r.Post("/dashboard/profiles/{id}/reset", dashHandler.ResetProfileTraffic)
 		r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
 
 		// Оплата (редирект на pay-service)
@@ -161,7 +164,9 @@ func main() {
 			r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
 			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
 			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
-			r.Post("/admin/users/{id}/balance", adminHandler.AddBalance)
+			r.Post("/admin/users/{id}/extra", adminHandler.SetExtraBalance)
+			r.Post("/admin/users/{id}/subscription", adminHandler.SetSubscription)
+			r.Post("/admin/users/{id}/subscription/cancel", adminHandler.CancelSubscription)
 
 			// Тарифы
 			r.Get("/admin/tariffs", adminHandler.TariffsList)
@@ -199,6 +204,8 @@ func connectXray(
 	holder *xray.Holder,
 	profiles *models.VPNProfileStore,
 	users *models.UserStore,
+	mailer *email.Sender,
+	baseURL string,
 ) {
 	firewall := xray.NewFirewall()
 	firewall.Init()
@@ -222,7 +229,7 @@ func connectXray(
 
 		syncUsersToXray(ctx, client, profiles)
 
-		collector := xray.NewStatsCollector(client, profiles, users, firewall)
+		collector := xray.NewStatsCollector(client, profiles, users, firewall, mailer, baseURL)
 		collector.InitCumulative(ctx)
 		holder.SetCollector(collector)
 		collector.Run(ctx)

@@ -17,7 +17,6 @@ var migrations = []string{
 		email_verified BOOLEAN DEFAULT FALSE,
 		verify_token  VARCHAR(64),
 		verify_expires TIMESTAMPTZ,
-		traffic_balance BIGINT DEFAULT 0,
 		created_at    TIMESTAMPTZ DEFAULT NOW(),
 		updated_at    TIMESTAMPTZ DEFAULT NOW()
 	)`,
@@ -56,12 +55,6 @@ var migrations = []string{
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token VARCHAR(64);
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_expires TIMESTAMPTZ;
-	EXCEPTION WHEN others THEN NULL;
-	END $$`,
-
-	// traffic_balance — баланс гигабайт (в байтах)
-	`DO $$ BEGIN
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS traffic_balance BIGINT DEFAULT 0;
 	EXCEPTION WHEN others THEN NULL;
 	END $$`,
 
@@ -142,13 +135,25 @@ END $$`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS base_traffic_used BIGINT NOT NULL DEFAULT 0`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_traffic_balance BIGINT NOT NULL DEFAULT 0`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS frozen_extra_balance BIGINT NOT NULL DEFAULT 0`,
+	// extra_traffic_granted — исходный объём extra в текущем цикле подписки.
+	// Нужен, чтобы считать «потрачено из extra» для прогресс-бара.
+	// += при каждом пополнении (addon-платёж, админский set), сбрасывается при
+	// продлении подписки (→ размороженный frozen), обнуляется при истечении.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_traffic_granted BIGINT NOT NULL DEFAULT 0`,
+	// На существующих юзерах синхронизируем granted = текущий balance
+	// (считаем что весь имеющийся extra «свежевыдан»).
+	`UPDATE users SET extra_traffic_granted = extra_traffic_balance
+	 WHERE extra_traffic_granted = 0 AND extra_traffic_balance > 0`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_5d_sent_at TIMESTAMPTZ`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_1d_sent_at TIMESTAMPTZ`,
+	// Метка «юзеру уже отправили письмо об отключении VPN» (balance/expired).
+	// Ставится в момент отправки, сбрасывается при любом пополнении
+	// (AddExtra/SetExtra/RenewSubscription/ApplyPayment), чтобы не спамить.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS block_notified_at TIMESTAMPTZ`,
 
-	// Перенос legacy-баланса в extra_traffic_balance (идемпотентно)
-	`UPDATE users
- SET extra_traffic_balance = traffic_balance
- WHERE traffic_balance > 0 AND extra_traffic_balance = 0`,
+	// Снос legacy-колонки: данные уже перенесены в extra_traffic_balance
+	// более ранней миграцией (на существующих БД). На чистых БД — no-op.
+	`ALTER TABLE users DROP COLUMN IF EXISTS traffic_balance`,
 
 	// Индекс для крона обработки истёкших подписок
 	`CREATE INDEX IF NOT EXISTS idx_users_tariff_expires
@@ -157,6 +162,12 @@ END $$`,
 
 	// payment_receipts: денормализованное поле для фильтрации по виду тарифа
 	`ALTER TABLE payment_receipts ADD COLUMN IF NOT EXISTS tariff_kind VARCHAR(20)`,
+
+	// Сид одного addon-тарифа, если в таблице ещё нет ни одного аддона.
+	// Базовые подписочные тарифы засеваются выше с дефолтным kind='subscription'.
+	`INSERT INTO tariffs (code, label, description, amount_rub, traffic_gb, duration_days, kind, sort_order)
+	 SELECT 'topup_20', '+20 ГБ', 'VPN Panel addon 20 GB', 200::numeric, 20::numeric, 0, 'addon', 100
+	 WHERE NOT EXISTS (SELECT 1 FROM tariffs WHERE kind = 'addon')`,
 }
 
 func (db *DB) Migrate() error {
