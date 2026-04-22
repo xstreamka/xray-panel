@@ -83,15 +83,34 @@ func (w *Worker) runExpire(ctx context.Context) {
 	for _, uid := range expired {
 		if collector != nil {
 			collector.DisconnectUserAll(ctx, uid, "subscription expired")
-			continue
+		} else {
+			// Нет коннекта к Xray — хотя бы снимем is_active в БД.
+			// При ближайшем подъёме Xray syncUsersToXray не добавит их обратно.
+			if _, err := w.profiles.DeactivateAllByUser(ctx, uid); err != nil {
+				log.Printf("Subscription: DeactivateAllByUser %d: %v", uid, err)
+			}
 		}
-		// Нет коннекта к Xray — хотя бы снимем is_active в БД.
-		// При ближайшем подъёме Xray syncUsersToXray не добавит их обратно.
-		if _, err := w.profiles.DeactivateAllByUser(ctx, uid); err != nil {
-			log.Printf("Subscription: DeactivateAllByUser %d: %v", uid, err)
-		}
+		w.notifyBlock(ctx, uid)
 	}
 	log.Printf("Subscription: expired %d users", len(expired))
+}
+
+// notifyBlock шлёт юзеру email об истечении подписки. SMTP вызываем
+// в горутине, чтобы не задерживать обработку списка истёкших.
+func (w *Worker) notifyBlock(ctx context.Context, userID int) {
+	if w.mailer == nil {
+		return
+	}
+	u, err := w.users.GetByID(ctx, userID)
+	if err != nil {
+		log.Printf("Subscription: notify block user=%d: %v", userID, err)
+		return
+	}
+	go func(to, username string) {
+		if err := w.mailer.SendBlockNotification(to, username, "expired", w.baseURL); err != nil {
+			log.Printf("Subscription: block email user=%d: %v", userID, err)
+		}
+	}(u.Email, u.Username)
 }
 
 // runReminders шлёт напоминания за 5 и 1 день до окончания подписки.

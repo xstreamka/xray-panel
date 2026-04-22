@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"xray-panel/internal/email"
 	"xray-panel/internal/models"
 )
 
@@ -14,6 +15,8 @@ type StatsCollector struct {
 	profiles *models.VPNProfileStore
 	users    *models.UserStore
 	firewall *Firewall
+	mailer   *email.Sender // nil если SMTP не настроен — уведомления пропускаем
+	baseURL  string
 
 	// pending хранит трафик, который не удалось записать в БД
 	pending map[string][2]int64
@@ -54,18 +57,43 @@ func NewStatsCollector(
 	profiles *models.VPNProfileStore,
 	users *models.UserStore,
 	firewall *Firewall,
+	mailer *email.Sender,
+	baseURL string,
 ) *StatsCollector {
 	return &StatsCollector{
 		client:        client,
 		profiles:      profiles,
 		users:         users,
 		firewall:      firewall,
+		mailer:        mailer,
+		baseURL:       baseURL,
 		pending:       make(map[string][2]int64),
 		cumulative:    make(map[string]int64),
 		limits:        make(map[string]int64),
 		uuidToUser:    make(map[string]int),
 		disabledUsers: make(map[int]bool),
 	}
+}
+
+// notifyBlock асинхронно шлёт юзеру письмо о блокировке. reason:
+// "balance" (кончился трафик) или "expired" (истёк срок подписки).
+// Выносим в горутину, чтобы SMTP не задерживал горячий путь коллектора.
+func (s *StatsCollector) notifyBlock(userID int, reason string) {
+	if s.mailer == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		u, err := s.users.GetByID(ctx, userID)
+		if err != nil {
+			log.Printf("Notify block: user %d: %v", userID, err)
+			return
+		}
+		if err := s.mailer.SendBlockNotification(u.Email, u.Username, reason, s.baseURL); err != nil {
+			log.Printf("Notify block email user=%d: %v", userID, err)
+		}
+	}()
 }
 
 // Snapshot возвращает потокобезопасный снимок для HTTP-хендлеров.
@@ -277,6 +305,7 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 			s.disabledUsersMu.Lock()
 			s.disabledUsers[uid] = true
 			s.disabledUsersMu.Unlock()
+			s.notifyBlock(uid, "balance")
 		}
 	}
 

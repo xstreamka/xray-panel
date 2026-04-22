@@ -59,11 +59,6 @@ func main() {
 
 	xrayHolder := xray.NewHolder()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore)
-
 	// Email sender (nil если SMTP не настроен)
 	var mailer *email.Sender
 	if cfg.SMTPConfigured() {
@@ -72,6 +67,11 @@ func main() {
 	} else {
 		log.Println("SMTP not configured — verification links will be logged to console")
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore, mailer, cfg.BaseURL)
 
 	subWorker := subscription.NewWorker(userStore, profileStore, mailer, xrayHolder, cfg.BaseURL)
 	go subWorker.Run(ctx)
@@ -201,6 +201,8 @@ func connectXray(
 	holder *xray.Holder,
 	profiles *models.VPNProfileStore,
 	users *models.UserStore,
+	mailer *email.Sender,
+	baseURL string,
 ) {
 	firewall := xray.NewFirewall()
 	firewall.Init()
@@ -224,7 +226,7 @@ func connectXray(
 
 		syncUsersToXray(ctx, client, profiles)
 
-		collector := xray.NewStatsCollector(client, profiles, users, firewall)
+		collector := xray.NewStatsCollector(client, profiles, users, firewall, mailer, baseURL)
 		collector.InitCumulative(ctx)
 		holder.SetCollector(collector)
 		collector.Run(ctx)
