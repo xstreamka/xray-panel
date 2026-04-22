@@ -42,17 +42,42 @@
 
 <h1 style="margin: 1.5rem 0;">Оплата подписки</h1>
 
-<div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-    <div>
-        <span style="color: #94a3b8;">Остаток:</span>
-        <strong style="font-size: 1.3rem; margin-left: 0.5rem;">{{formatBytes .User.TotalAvailable}}</strong>
-        {{if .HasActiveSub}}
-            <span class="badge badge-green" style="margin-left: 0.8rem;">подписка активна до {{.User.TariffExpiresAt.Format "02.01.2006"}}</span>
-        {{else}}
-            <span class="badge badge-gray" style="margin-left: 0.8rem;">подписка не активна</span>
-        {{end}}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.8rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+            <span style="color: #94a3b8; font-size: 0.9rem;">Подписка:</span>
+            {{if .HasActiveSub}}
+                <span class="badge badge-green">активна до {{.User.TariffExpiresAt.Format "02.01.2006"}}</span>
+            {{else}}
+                <span class="badge badge-gray">не активна</span>
+            {{end}}
+        </div>
+        <a href="/dashboard" style="color: #38bdf8; text-decoration: none; font-size: 0.9rem;">← В панель</a>
     </div>
-    <a href="/dashboard" style="color: #38bdf8; text-decoration: none;">← Вернуться</a>
+
+    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; padding-top: 0.8rem; border-top: 1px solid #334155;">
+        <div>
+            <div style="color: #94a3b8; font-size: 0.8rem;">Базовый трафик</div>
+            <strong style="font-size: 1.15rem;">{{formatBytes .BaseRemaining}}</strong>
+            <span style="color: #64748b; font-size: 0.85rem;">/ {{formatBytes .User.BaseTrafficLimit}}</span>
+        </div>
+        <div>
+            <div style="color: #94a3b8; font-size: 0.8rem;">Докупленный</div>
+            <strong style="font-size: 1.15rem; color: {{if gt .User.ExtraTrafficBalance 0}}#fcd34d{{else}}#64748b{{end}};">
+                {{formatBytes .User.ExtraTrafficBalance}}
+            </strong>
+        </div>
+        {{if gt .User.FrozenExtraBalance 0}}
+        <div title="Трафик заморожен и вернётся при следующей оплате подписки">
+            <div style="color: #94a3b8; font-size: 0.8rem;">❄ Заморожено</div>
+            <strong style="font-size: 1.15rem; color: #60a5fa;">{{formatBytes .User.FrozenExtraBalance}}</strong>
+        </div>
+        {{end}}
+        <div style="margin-left: auto;">
+            <div style="color: #94a3b8; font-size: 0.8rem;">Всего доступно</div>
+            <strong style="font-size: 1.3rem;">{{formatBytes .User.TotalAvailable}}</strong>
+        </div>
+    </div>
 </div>
 
 <h2 style="margin-top: 2rem; margin-bottom: 0.8rem; font-size: 1.3rem;">Подписка на месяц</h2>

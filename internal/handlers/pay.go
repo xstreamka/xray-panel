@@ -94,13 +94,19 @@ func (h *PayHandler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	baseRemaining := user.BaseTrafficLimit - user.BaseTrafficUsed
+	if baseRemaining < 0 {
+		baseRemaining = 0
+	}
+
 	h.renderer.Render(w, "pay.html", map[string]any{
-		"User":         user,
-		"SubPlans":     subPlans,
-		"AddonPlans":   addonPlans,
-		"HasActiveSub": user.HasActiveSubscription(),
-		"Status":       r.URL.Query().Get("payment"),
-		"InvID":        r.URL.Query().Get("inv_id"),
+		"User":          user,
+		"SubPlans":      subPlans,
+		"AddonPlans":    addonPlans,
+		"HasActiveSub":  user.HasActiveSubscription(),
+		"BaseRemaining": baseRemaining,
+		"Status":        r.URL.Query().Get("payment"),
+		"InvID":         r.URL.Query().Get("inv_id"),
 	})
 }
 
