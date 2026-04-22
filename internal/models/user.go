@@ -36,6 +36,7 @@ type User struct {
 	FrozenExtraBalance  int64      `json:"frozen_extra_balance"`
 	Reminder5dSentAt    *time.Time `json:"-"`
 	Reminder1dSentAt    *time.Time `json:"-"`
+	BlockNotifiedAt     *time.Time `json:"-"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -69,7 +70,7 @@ const userCols = `id, username, email, is_admin, is_active, email_verified,
                   current_tariff_id, tariff_expires_at,
                   base_traffic_limit, base_traffic_used,
                   extra_traffic_balance, extra_traffic_granted, frozen_extra_balance,
-                  reminder_5d_sent_at, reminder_1d_sent_at,
+                  reminder_5d_sent_at, reminder_1d_sent_at, block_notified_at,
                   created_at, updated_at`
 
 func scanUser(row interface {
@@ -80,7 +81,7 @@ func scanUser(row interface {
 		&u.CurrentTariffID, &u.TariffExpiresAt,
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
 		&u.ExtraTrafficBalance, &u.ExtraTrafficGranted, &u.FrozenExtraBalance,
-		&u.Reminder5dSentAt, &u.Reminder1dSentAt,
+		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
 		&u.CreatedAt, &u.UpdatedAt,
 	)
 }
@@ -131,7 +132,7 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 		&u.CurrentTariffID, &u.TariffExpiresAt,
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
 		&u.ExtraTrafficBalance, &u.ExtraTrafficGranted, &u.FrozenExtraBalance,
-		&u.Reminder5dSentAt, &u.Reminder1dSentAt,
+		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
 		&u.CreatedAt, &u.UpdatedAt,
 		&u.PasswordHash,
 	)
@@ -240,6 +241,7 @@ func (s *UserStore) RenewSubscription(
 		    frozen_extra_balance  = 0,
 		    reminder_5d_sent_at   = NULL,
 		    reminder_1d_sent_at   = NULL,
+		    block_notified_at     = NULL,
 		    updated_at = NOW()
 		 WHERE id = $4
 		 RETURNING `+userCols,
@@ -253,6 +255,7 @@ func (s *UserStore) RenewSubscription(
 
 // AddExtra добавляет байты к активному extra-балансу (addon-тариф или подарок от админа).
 // Также увеличивает granted — «сколько было выдано в этом цикле» — для прогресс-бара.
+// Сбрасывает block_notified_at, чтобы при следующем исчерпании юзер получил письмо.
 func (s *UserStore) AddExtra(ctx context.Context, userID int, bytes int64) error {
 	if bytes <= 0 {
 		return nil
@@ -261,6 +264,7 @@ func (s *UserStore) AddExtra(ctx context.Context, userID int, bytes int64) error
 		`UPDATE users
 		 SET extra_traffic_balance = extra_traffic_balance + $1,
 		     extra_traffic_granted = extra_traffic_granted + $1,
+		     block_notified_at     = NULL,
 		     updated_at = NOW()
 		 WHERE id = $2`,
 		bytes, userID,
@@ -277,6 +281,7 @@ func (s *UserStore) AddExtra(ctx context.Context, userID int, bytes int64) error
 // SetExtra жёстко устанавливает extra_traffic_balance заданному значению.
 // Административный инструмент для ручной коррекции: +X, -X или полный сброс.
 // granted синхронизируется с новым значением — бар стартует с «100% осталось».
+// block_notified_at сбрасываем только если выдали трафик (bytes > 0).
 func (s *UserStore) SetExtra(ctx context.Context, userID int, bytes int64) error {
 	if bytes < 0 {
 		bytes = 0
@@ -285,6 +290,7 @@ func (s *UserStore) SetExtra(ctx context.Context, userID int, bytes int64) error
 		`UPDATE users
 		 SET extra_traffic_balance = $1,
 		     extra_traffic_granted = $1,
+		     block_notified_at     = CASE WHEN $1 > 0 THEN NULL ELSE block_notified_at END,
 		     updated_at = NOW()
 		 WHERE id = $2`,
 		bytes, userID,
@@ -296,6 +302,22 @@ func (s *UserStore) SetExtra(ctx context.Context, userID int, bytes int64) error
 		return fmt.Errorf("user %d not found", userID)
 	}
 	return nil
+}
+
+// TryMarkBlockNotified атомарно ставит block_notified_at = NOW(), если он
+// ещё NULL, и возвращает true. Если уже был проставлен — возвращает false,
+// и вызывающий код должен пропустить отправку письма. Сбрасывается при
+// любом пополнении (AddExtra/SetExtra/RenewSubscription/ApplyPayment).
+func (s *UserStore) TryMarkBlockNotified(ctx context.Context, userID int) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET block_notified_at = NOW(), updated_at = NOW()
+		 WHERE id = $1 AND block_notified_at IS NULL`,
+		userID,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // CancelSubscription обнуляет подписку юзера (но не трогает extra/frozen).

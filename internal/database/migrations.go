@@ -146,6 +146,10 @@ END $$`,
 	 WHERE extra_traffic_granted = 0 AND extra_traffic_balance > 0`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_5d_sent_at TIMESTAMPTZ`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_1d_sent_at TIMESTAMPTZ`,
+	// Метка «юзеру уже отправили письмо об отключении VPN» (balance/expired).
+	// Ставится в момент отправки, сбрасывается при любом пополнении
+	// (AddExtra/SetExtra/RenewSubscription/ApplyPayment), чтобы не спамить.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS block_notified_at TIMESTAMPTZ`,
 
 	// Снос legacy-колонки: данные уже перенесены в extra_traffic_balance
 	// более ранней миграцией (на существующих БД). На чистых БД — no-op.

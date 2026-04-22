@@ -95,12 +95,22 @@ func (w *Worker) runExpire(ctx context.Context) {
 	log.Printf("Subscription: expired %d users", len(expired))
 }
 
-// notifyBlock шлёт юзеру email об истечении подписки. SMTP вызываем
-// в горутине, чтобы не задерживать обработку списка истёкших.
+// notifyBlock шлёт юзеру email об истечении подписки. Идемпотентно:
+// TryMarkBlockNotified защищает от повторной отправки, пока юзер не
+// продлит подписку или не получит пополнение (что сбросит флаг).
 func (w *Worker) notifyBlock(ctx context.Context, userID int) {
 	if w.mailer == nil {
 		return
 	}
+	first, err := w.users.TryMarkBlockNotified(ctx, userID)
+	if err != nil {
+		log.Printf("Subscription: mark block user=%d: %v", userID, err)
+		return
+	}
+	if !first {
+		return
+	}
+
 	u, err := w.users.GetByID(ctx, userID)
 	if err != nil {
 		log.Printf("Subscription: notify block user=%d: %v", userID, err)

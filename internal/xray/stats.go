@@ -77,7 +77,8 @@ func NewStatsCollector(
 
 // notifyBlock асинхронно шлёт юзеру письмо о блокировке. reason:
 // "balance" (кончился трафик) или "expired" (истёк срок подписки).
-// Выносим в горутину, чтобы SMTP не задерживал горячий путь коллектора.
+// Идемпотентно: TryMarkBlockNotified не даст отправить повторно, пока
+// юзер не пополнит баланс (что сбросит флаг).
 func (s *StatsCollector) notifyBlock(userID int, reason string) {
 	if s.mailer == nil {
 		return
@@ -85,9 +86,19 @@ func (s *StatsCollector) notifyBlock(userID int, reason string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
+
+		first, err := s.users.TryMarkBlockNotified(ctx, userID)
+		if err != nil {
+			log.Printf("Notify block: mark user %d: %v", userID, err)
+			return
+		}
+		if !first {
+			return
+		}
+
 		u, err := s.users.GetByID(ctx, userID)
 		if err != nil {
-			log.Printf("Notify block: user %d: %v", userID, err)
+			log.Printf("Notify block: get user %d: %v", userID, err)
 			return
 		}
 		if err := s.mailer.SendBlockNotification(u.Email, u.Username, reason, s.baseURL); err != nil {
