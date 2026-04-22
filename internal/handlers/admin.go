@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"xray-panel/internal/models"
@@ -96,6 +97,18 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 
 	profiles, onlineUsers, onlineIPs := h.enrichAllProfiles(r.Context(), profiles)
 
+	// Подписочные тарифы — для селекта «задать подписку» в каждой карточке юзера
+	subPlans, err := h.tariffs.ListActiveByKind(r.Context(), models.TariffKindSubscription)
+	if err != nil {
+		log.Printf("Admin: list sub tariffs error: %v", err)
+	}
+
+	// Имена тарифов для отображения текущей подписки юзера
+	tariffNames := make(map[int]string)
+	for _, t := range subPlans {
+		tariffNames[t.ID] = t.Label
+	}
+
 	type profileView struct {
 		models.VPNProfile
 		IsOnline  bool
@@ -118,6 +131,8 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 		TotalTraffic int64
 		ActiveCount  int
 		OnlineCount  int
+		TariffLabel  string
+		DaysLeft     int
 	}
 
 	var views []userView
@@ -132,11 +147,27 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 				v.OnlineCount++
 			}
 		}
+
+		if u.CurrentTariffID != nil {
+			if name, ok := tariffNames[*u.CurrentTariffID]; ok {
+				v.TariffLabel = name
+			} else if t, err := h.tariffs.GetByID(r.Context(), *u.CurrentTariffID); err == nil {
+				v.TariffLabel = t.Label
+			}
+		}
+		if u.TariffExpiresAt != nil {
+			d := time.Until(*u.TariffExpiresAt).Hours() / 24
+			if d > 0 {
+				v.DaysLeft = int(d) + 1
+			}
+		}
+
 		views = append(views, v)
 	}
 
 	h.renderer.Render(w, "admin.html", map[string]any{
-		"Users": views,
+		"Users":    views,
+		"SubPlans": subPlans,
 	})
 }
 
@@ -263,6 +294,96 @@ func (h *AdminHandler) AddBalance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("Admin: added %.1f GB to user %d", addGB, userID)
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// DeductBalance — POST /admin/users/{id}/balance/deduct — списать ГБ из extra
+func (h *AdminHandler) DeductBalance(w http.ResponseWriter, r *http.Request) {
+	userID, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	gb, _ := strconv.ParseFloat(r.FormValue("deduct_gb"), 64)
+
+	if gb <= 0 {
+		http.Error(w, "Укажите количество ГБ > 0", http.StatusBadRequest)
+		return
+	}
+
+	bytes := int64(gb * 1024 * 1024 * 1024)
+
+	if err := h.users.SubtractExtra(r.Context(), userID, bytes); err != nil {
+		log.Printf("Admin: deduct balance error for user %d: %v", userID, err)
+		http.Error(w, "Ошибка списания", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Admin: deducted %.1f GB from user %d", gb, userID)
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// SetSubscription — POST /admin/users/{id}/subscription — активировать/продлить
+// подписку юзера указанным тарифом. Если duration_days не задан или <=0, берётся
+// из тарифа. Логика продления — как в штатном webhook'е: max(NOW(), old_expires).
+func (h *AdminHandler) SetSubscription(w http.ResponseWriter, r *http.Request) {
+	userID, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	tariffID, _ := strconv.Atoi(r.FormValue("tariff_id"))
+	durationDays, _ := strconv.Atoi(r.FormValue("duration_days"))
+
+	if tariffID <= 0 {
+		http.Error(w, "Не выбран тариф", http.StatusBadRequest)
+		return
+	}
+
+	tariff, err := h.tariffs.GetByID(r.Context(), tariffID)
+	if err != nil {
+		http.Error(w, "Тариф не найден", http.StatusBadRequest)
+		return
+	}
+	if tariff.Kind != models.TariffKindSubscription {
+		http.Error(w, "Нельзя активировать подписку по тарифу-докупке", http.StatusBadRequest)
+		return
+	}
+
+	if durationDays <= 0 {
+		durationDays = tariff.DurationDays
+	}
+	if durationDays <= 0 {
+		http.Error(w, "Некорректный срок подписки", http.StatusBadRequest)
+		return
+	}
+
+	baseLimitBytes := int64(tariff.TrafficGB * 1024 * 1024 * 1024)
+
+	if _, err := h.users.RenewSubscription(r.Context(), userID, tariffID, durationDays, baseLimitBytes); err != nil {
+		log.Printf("Admin: RenewSubscription user=%d tariff=%d: %v", userID, tariffID, err)
+		http.Error(w, "Ошибка активации подписки", http.StatusInternalServerError)
+		return
+	}
+
+	// Если у юзера были отключены профили (баланс был 0 / подписка истекла) —
+	// возвращаем их в Xray. Для уже активных юзеров метод — no-op.
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.ReactivateUserAll(r.Context(), userID)
+	}
+
+	log.Printf("Admin: activated subscription user=%d tariff=%s duration=%d base=%.1f GB",
+		userID, tariff.Code, durationDays, tariff.TrafficGB)
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// CancelSubscription — POST /admin/users/{id}/subscription/cancel
+// Обнуляет подписку (current_tariff_id, tariff_expires_at, base_limit, base_used).
+// extra и frozen не трогает — админ может отдельно списать, если нужно.
+// Профили не отключаем принудительно: если у юзера остался extra, он имеет
+// право его использовать; коллектор сам отключит при TotalAvailable=0.
+func (h *AdminHandler) CancelSubscription(w http.ResponseWriter, r *http.Request) {
+	userID, _ := strconv.Atoi(chi.URLParam(r, "id"))
+
+	if err := h.users.CancelSubscription(r.Context(), userID); err != nil {
+		log.Printf("Admin: CancelSubscription user=%d: %v", userID, err)
+		http.Error(w, "Ошибка отмены", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Admin: cancelled subscription user=%d", userID)
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 

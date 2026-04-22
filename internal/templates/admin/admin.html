@@ -58,16 +58,82 @@
         </div>
     </div>
 
-    <!-- Баланс и пополнение -->
-    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.8rem; padding: 0.5rem; background: #0f172a; border-radius: 6px;">
-        <span style="color: #94a3b8; font-size: 0.85rem;">Баланс:</span>
-        <strong data-stat="user-balance">{{formatBytes .TotalAvailable}}</strong>
-        <form method="POST" action="/admin/users/{{.ID}}/balance" style="display: flex; gap: 0.3rem; align-items: center; margin-left: auto;">
-            <input type="number" name="add_gb" step="0.5" min="0.5" value="5" placeholder="ГБ"
-                style="width: 70px; padding: 0.2rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem;">
-            <span style="color: #94a3b8; font-size: 0.8rem;">GB</span>
-            <button type="submit" class="btn btn-sm btn-primary">Пополнить</button>
-        </form>
+    <!-- Подписка и баланс -->
+    <div style="margin-bottom: 0.8rem; padding: 0.7rem; background: #0f172a; border-radius: 6px;">
+        <div style="display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.6rem;">
+            <div>
+                <span style="color: #94a3b8; font-size: 0.8rem;">Подписка:</span>
+                {{if .TariffLabel}}
+                    <strong>{{.TariffLabel}}</strong>
+                    {{if .TariffExpiresAt}}
+                        {{if gt .DaysLeft 0}}
+                            <span class="badge badge-green">до {{.TariffExpiresAt.Format "02.01.2006"}} · {{.DaysLeft}} дн.</span>
+                        {{else}}
+                            <span class="badge badge-red">истёк {{.TariffExpiresAt.Format "02.01.2006"}}</span>
+                        {{end}}
+                    {{end}}
+                {{else}}
+                    <span style="color: #64748b;">—</span>
+                {{end}}
+            </div>
+            <div style="display: flex; gap: 1rem; margin-left: auto;">
+                <span style="font-size: 0.85rem;" title="База">
+                    <span style="color: #94a3b8;">База:</span>
+                    <strong data-stat="user-base">{{formatBytes .BaseTrafficUsed}} / {{formatBytes .BaseTrafficLimit}}</strong>
+                </span>
+                <span style="font-size: 0.85rem;" title="Докупленный">
+                    <span style="color: #94a3b8;">Extra:</span>
+                    <strong style="color: #fcd34d;" data-stat="user-extra">{{formatBytes .ExtraTrafficBalance}}</strong>
+                </span>
+                {{if gt .FrozenExtraBalance 0}}
+                <span style="font-size: 0.85rem;" title="Заморожено">
+                    <span style="color: #94a3b8;">❄</span>
+                    <strong style="color: #60a5fa;">{{formatBytes .FrozenExtraBalance}}</strong>
+                </span>
+                {{end}}
+                <span style="font-size: 0.85rem;">
+                    <span style="color: #94a3b8;">Всего:</span>
+                    <strong data-stat="user-balance">{{formatBytes .TotalAvailable}}</strong>
+                </span>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+            <form method="POST" action="/admin/users/{{.ID}}/subscription" style="display: flex; gap: 0.4rem; align-items: center;">
+                <select name="tariff_id" style="padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
+                    <option value="">— тариф —</option>
+                    {{range $.SubPlans}}
+                    <option value="{{.ID}}">{{.Label}} ({{.DurationDays}} дн.)</option>
+                    {{end}}
+                </select>
+                <input type="number" name="duration_days" min="0" placeholder="дн."
+                    style="width: 60px; padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;"
+                    title="Переопределить срок (пусто = как в тарифе)">
+                <button type="submit" class="btn btn-sm btn-primary">Активировать</button>
+            </form>
+            {{if .TariffLabel}}
+            <form method="POST" action="/admin/users/{{.ID}}/subscription/cancel"
+                  onsubmit="return confirm('Отменить подписку? base обнулится, extra/frozen останется.');">
+                <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Отменить подписку</button>
+            </form>
+            {{end}}
+
+            <span style="flex: 1;"></span>
+
+            <form method="POST" action="/admin/users/{{.ID}}/balance" style="display: flex; gap: 0.3rem; align-items: center;">
+                <input type="number" name="add_gb" step="0.5" min="0.5" value="5"
+                    style="width: 60px; padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
+                <span style="color: #94a3b8; font-size: 0.8rem;">ГБ</span>
+                <button type="submit" class="btn btn-sm btn-primary" title="Добавить в extra">+</button>
+            </form>
+            <form method="POST" action="/admin/users/{{.ID}}/balance/deduct" style="display: flex; gap: 0.3rem; align-items: center;"
+                  onsubmit="return confirm('Списать из extra?');">
+                <input type="number" name="deduct_gb" step="0.5" min="0.5" value="5"
+                    style="width: 60px; padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
+                <span style="color: #94a3b8; font-size: 0.8rem;">ГБ</span>
+                <button type="submit" class="btn btn-sm btn-danger" title="Списать из extra">−</button>
+            </form>
+        </div>
     </div>
 
     {{if .Profiles}}

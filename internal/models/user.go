@@ -269,6 +269,55 @@ func (s *UserStore) AddExtra(ctx context.Context, userID int, bytes int64) error
 	return nil
 }
 
+// SubtractExtra списывает байты из extra_traffic_balance, не уходя в минус.
+// Административный инструмент для ручной коррекции (например, возврат средств,
+// исправление ошибки начисления).
+func (s *UserStore) SubtractExtra(ctx context.Context, userID int, bytes int64) error {
+	if bytes <= 0 {
+		return nil
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users
+		 SET extra_traffic_balance = GREATEST(0, extra_traffic_balance - $1),
+		     updated_at = NOW()
+		 WHERE id = $2`,
+		bytes, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
+}
+
+// CancelSubscription обнуляет подписку юзера (но не трогает extra/frozen).
+// Профили отключатся автоматически в ближайшем тике stats-коллектора по
+// критерию TotalAvailable <= 0, если base исчерпан. Для немедленного отключения
+// вызывающий код должен сам дёрнуть DisconnectUserAll.
+func (s *UserStore) CancelSubscription(ctx context.Context, userID int) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET
+		    current_tariff_id   = NULL,
+		    tariff_expires_at   = NULL,
+		    base_traffic_limit  = 0,
+		    base_traffic_used   = 0,
+		    reminder_5d_sent_at = NULL,
+		    reminder_1d_sent_at = NULL,
+		    updated_at          = NOW()
+		 WHERE id = $1`,
+		userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
+}
+
 // DeductTraffic атомарно списывает дельту: сначала заполняет base_used до лимита,
 // остаток снимает с extra. Возвращает обновлённого юзера и флаг «исчерпан» —
 // если remaining <= 0, вызывающий код должен отключить все профили юзера.
