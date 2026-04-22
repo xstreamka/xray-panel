@@ -271,51 +271,34 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
-// AddBalance — POST /admin/users/{id}/balance — пополнить баланс пользователя
-func (h *AdminHandler) AddBalance(w http.ResponseWriter, r *http.Request) {
+// SetExtraBalance — POST /admin/users/{id}/extra — установить extra-баланс
+// в ровно заданное значение (ГБ). Используется для ручной коррекции: и для
+// добавления, и для списания, и для сброса в 0.
+func (h *AdminHandler) SetExtraBalance(w http.ResponseWriter, r *http.Request) {
 	userID, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	addGB, _ := strconv.ParseFloat(r.FormValue("add_gb"), 64)
-
-	if addGB <= 0 {
-		http.Error(w, "Укажите количество ГБ > 0", http.StatusBadRequest)
-		return
-	}
-
-	addBytes := int64(addGB * 1024 * 1024 * 1024)
-
-	if err := h.users.AddExtra(r.Context(), userID, addBytes); err != nil {
-		log.Printf("Admin: add balance error for user %d: %v", userID, err)
-		http.Error(w, "Ошибка пополнения баланса", http.StatusInternalServerError)
-		return
-	}
-
-	if collector := h.xrayHolder.GetCollector(); collector != nil {
-		collector.ReactivateUserAll(r.Context(), userID)
-	}
-
-	log.Printf("Admin: added %.1f GB to user %d", addGB, userID)
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
-}
-
-// DeductBalance — POST /admin/users/{id}/balance/deduct — списать ГБ из extra
-func (h *AdminHandler) DeductBalance(w http.ResponseWriter, r *http.Request) {
-	userID, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	gb, _ := strconv.ParseFloat(r.FormValue("deduct_gb"), 64)
-
-	if gb <= 0 {
-		http.Error(w, "Укажите количество ГБ > 0", http.StatusBadRequest)
+	gb, err := strconv.ParseFloat(r.FormValue("extra_gb"), 64)
+	if err != nil || gb < 0 {
+		http.Error(w, "Укажите количество ГБ ≥ 0", http.StatusBadRequest)
 		return
 	}
 
 	bytes := int64(gb * 1024 * 1024 * 1024)
 
-	if err := h.users.SubtractExtra(r.Context(), userID, bytes); err != nil {
-		log.Printf("Admin: deduct balance error for user %d: %v", userID, err)
-		http.Error(w, "Ошибка списания", http.StatusInternalServerError)
+	if err := h.users.SetExtra(r.Context(), userID, bytes); err != nil {
+		log.Printf("Admin: set extra error for user %d: %v", userID, err)
+		http.Error(w, "Ошибка сохранения", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Admin: deducted %.1f GB from user %d", gb, userID)
+	// Если юзер был отключён из-за исчерпанного баланса — вернём профили
+	// в Xray. Если не был — это no-op.
+	if bytes > 0 {
+		if collector := h.xrayHolder.GetCollector(); collector != nil {
+			collector.ReactivateUserAll(r.Context(), userID)
+		}
+	}
+
+	log.Printf("Admin: set extra=%.2f GB for user %d", gb, userID)
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 

@@ -269,17 +269,16 @@ func (s *UserStore) AddExtra(ctx context.Context, userID int, bytes int64) error
 	return nil
 }
 
-// SubtractExtra списывает байты из extra_traffic_balance, не уходя в минус.
-// Административный инструмент для ручной коррекции (например, возврат средств,
-// исправление ошибки начисления).
-func (s *UserStore) SubtractExtra(ctx context.Context, userID int, bytes int64) error {
-	if bytes <= 0 {
-		return nil
+// SetExtra жёстко устанавливает extra_traffic_balance заданному значению.
+// Административный инструмент для ручной коррекции: +X, -X или полный сброс.
+// Отрицательные значения не допускаются (на уровне параметра).
+func (s *UserStore) SetExtra(ctx context.Context, userID int, bytes int64) error {
+	if bytes < 0 {
+		bytes = 0
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users
-		 SET extra_traffic_balance = GREATEST(0, extra_traffic_balance - $1),
-		     updated_at = NOW()
+		 SET extra_traffic_balance = $1, updated_at = NOW()
 		 WHERE id = $2`,
 		bytes, userID,
 	)

@@ -120,18 +120,13 @@
 
             <span style="flex: 1;"></span>
 
-            <form method="POST" action="/admin/users/{{.ID}}/balance" style="display: flex; gap: 0.3rem; align-items: center;">
-                <input type="number" name="add_gb" step="0.5" min="0.5" value="5"
-                    style="width: 60px; padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
+            <form method="POST" action="/admin/users/{{.ID}}/extra" style="display: flex; gap: 0.3rem; align-items: center;"
+                  title="Установить extra-баланс (ГБ) — и плюс, и минус">
+                <label style="color: #94a3b8; font-size: 0.8rem; margin: 0;">Extra:</label>
+                <input type="number" name="extra_gb" step="0.01" min="0" value="{{divGB .ExtraTrafficBalance}}"
+                    style="width: 80px; padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
                 <span style="color: #94a3b8; font-size: 0.8rem;">ГБ</span>
-                <button type="submit" class="btn btn-sm btn-primary" title="Добавить в extra">+</button>
-            </form>
-            <form method="POST" action="/admin/users/{{.ID}}/balance/deduct" style="display: flex; gap: 0.3rem; align-items: center;"
-                  onsubmit="return confirm('Списать из extra?');">
-                <input type="number" name="deduct_gb" step="0.5" min="0.5" value="5"
-                    style="width: 60px; padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
-                <span style="color: #94a3b8; font-size: 0.8rem;">ГБ</span>
-                <button type="submit" class="btn btn-sm btn-danger" title="Списать из extra">−</button>
+                <button type="submit" class="btn btn-sm btn-primary">Сохранить</button>
             </form>
         </div>
     </div>

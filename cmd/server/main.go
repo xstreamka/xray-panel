@@ -161,8 +161,7 @@ func main() {
 			r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
 			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
 			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
-			r.Post("/admin/users/{id}/balance", adminHandler.AddBalance)
-			r.Post("/admin/users/{id}/balance/deduct", adminHandler.DeductBalance)
+			r.Post("/admin/users/{id}/extra", adminHandler.SetExtraBalance)
 			r.Post("/admin/users/{id}/subscription", adminHandler.SetSubscription)
 			r.Post("/admin/users/{id}/subscription/cancel", adminHandler.CancelSubscription)
 
