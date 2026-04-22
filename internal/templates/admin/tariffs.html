@@ -21,6 +21,13 @@
     <h3 style="margin-bottom: 0.8rem;">Новый тариф</h3>
     <form method="POST" action="/admin/tariffs" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; align-items: end;">
         <div>
+            <label>Тип</label>
+            <select name="kind" style="margin-bottom: 0;">
+                <option value="subscription" selected>Подписка</option>
+                <option value="addon">Докупка</option>
+            </select>
+        </div>
+        <div>
             <label>Код</label>
             <input type="text" name="code" placeholder="basic_10" required style="margin-bottom: 0;">
         </div>
@@ -39,6 +46,10 @@
         <div>
             <label>ГБ</label>
             <input type="number" step="0.5" min="0" name="traffic_gb" placeholder="10" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Дней (для подписки)</label>
+            <input type="number" min="0" name="duration_days" value="30" style="margin-bottom: 0;">
         </div>
         <div>
             <label>Порядок</label>
@@ -62,6 +73,11 @@
         <div>
             <strong style="font-size: 1.1rem;">{{.Label}}</strong>
             <span style="color: #94a3b8; margin-left: 0.5rem; font-family: monospace;">{{.Code}}</span>
+            {{if eq (printf "%s" .Kind) "subscription"}}
+                <span class="badge badge-blue">подписка · {{.DurationDays}} дн.</span>
+            {{else}}
+                <span class="badge badge-yellow">докупка</span>
+            {{end}}
             {{if .IsPopular}}<span class="badge badge-green">⭐ популярный</span>{{end}}
             {{if not .IsActive}}<span class="badge badge-red">отключён</span>{{end}}
         </div>
@@ -69,6 +85,13 @@
     </div>
 
     <form method="POST" action="/admin/tariffs/{{.ID}}" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; align-items: end;">
+        <div>
+            <label>Тип</label>
+            <select name="kind" style="margin-bottom: 0;">
+                <option value="subscription" {{if eq (printf "%s" .Kind) "subscription"}}selected{{end}}>Подписка</option>
+                <option value="addon" {{if eq (printf "%s" .Kind) "addon"}}selected{{end}}>Докупка</option>
+            </select>
+        </div>
         <div>
             <label>Код</label>
             <input type="text" name="code" value="{{.Code}}" required style="margin-bottom: 0;">
@@ -88,6 +111,10 @@
         <div>
             <label>ГБ</label>
             <input type="number" step="0.5" min="0" name="traffic_gb" value="{{printf "%.1f" .TrafficGB}}" required style="margin-bottom: 0;">
+        </div>
+        <div>
+            <label>Дней (для подписки)</label>
+            <input type="number" min="0" name="duration_days" value="{{.DurationDays}}" style="margin-bottom: 0;">
         </div>
         <div>
             <label>Порядок</label>

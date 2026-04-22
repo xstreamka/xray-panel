@@ -149,6 +149,12 @@ END $$`,
 
 	// payment_receipts: денормализованное поле для фильтрации по виду тарифа
 	`ALTER TABLE payment_receipts ADD COLUMN IF NOT EXISTS tariff_kind VARCHAR(20)`,
+
+	// Сид одного addon-тарифа, если в таблице ещё нет ни одного аддона.
+	// Базовые подписочные тарифы засеваются выше с дефолтным kind='subscription'.
+	`INSERT INTO tariffs (code, label, description, amount_rub, traffic_gb, duration_days, kind, sort_order)
+	 SELECT 'topup_20', '+20 ГБ', 'VPN Panel addon 20 GB', 200::numeric, 20::numeric, 0, 'addon', 100
+	 WHERE NOT EXISTS (SELECT 1 FROM tariffs WHERE kind = 'addon')`,
 }
 
 func (db *DB) Migrate() error {

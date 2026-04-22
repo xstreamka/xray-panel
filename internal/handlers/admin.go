@@ -401,15 +401,29 @@ func parseTariffForm(r *http.Request) *models.Tariff {
 	amount, _ := strconv.ParseFloat(r.FormValue("amount_rub"), 64)
 	gb, _ := strconv.ParseFloat(r.FormValue("traffic_gb"), 64)
 	sortOrder, _ := strconv.Atoi(r.FormValue("sort_order"))
+	durationDays, _ := strconv.Atoi(r.FormValue("duration_days"))
+
+	kind := models.TariffKind(strings.TrimSpace(r.FormValue("kind")))
+	if kind == "" {
+		kind = models.TariffKindSubscription
+	}
+	// Для addon длительность игнорируется на уровне БД-констрейнта,
+	// но для чистоты обнулим — чтобы UI/админка не вводили в заблуждение.
+	if kind == models.TariffKindAddon {
+		durationDays = 0
+	}
+
 	return &models.Tariff{
-		Code:        strings.TrimSpace(r.FormValue("code")),
-		Label:       strings.TrimSpace(r.FormValue("label")),
-		Description: strings.TrimSpace(r.FormValue("description")),
-		AmountRub:   amount,
-		TrafficGB:   gb,
-		IsPopular:   r.FormValue("is_popular") == "on",
-		IsActive:    r.FormValue("is_active") == "on",
-		SortOrder:   sortOrder,
+		Code:         strings.TrimSpace(r.FormValue("code")),
+		Label:        strings.TrimSpace(r.FormValue("label")),
+		Description:  strings.TrimSpace(r.FormValue("description")),
+		AmountRub:    amount,
+		TrafficGB:    gb,
+		Kind:         kind,
+		DurationDays: durationDays,
+		IsPopular:    r.FormValue("is_popular") == "on",
+		IsActive:     r.FormValue("is_active") == "on",
+		SortOrder:    sortOrder,
 	}
 }
 
@@ -422,6 +436,16 @@ func validateTariff(t *models.Tariff) error {
 	}
 	if t.TrafficGB <= 0 {
 		return fmt.Errorf("количество ГБ должно быть больше нуля")
+	}
+	switch t.Kind {
+	case models.TariffKindSubscription:
+		if t.DurationDays <= 0 {
+			return fmt.Errorf("для подписки задайте срок в днях (> 0)")
+		}
+	case models.TariffKindAddon:
+		// ok
+	default:
+		return fmt.Errorf("недопустимый тип тарифа: %q", t.Kind)
 	}
 	// Description уходит в Робокассу. Допустимы латиница, кириллица, цифры,
 	// пробел и базовые знаки препинания. Длина — максимум 100 символов.

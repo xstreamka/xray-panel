@@ -94,13 +94,8 @@ func (h *PayHandler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Для обратной совместимости со старым шаблоном (до UI-рефакторинга в шаге 6)
-	// отдаём также плоский список всех активных тарифов.
-	allPlans := append(append([]models.Tariff{}, subPlans...), addonPlans...)
-
 	h.renderer.Render(w, "pay.html", map[string]any{
 		"User":         user,
-		"Tariffs":      allPlans, // legacy ключ
 		"SubPlans":     subPlans,
 		"AddonPlans":   addonPlans,
 		"HasActiveSub": user.HasActiveSubscription(),
