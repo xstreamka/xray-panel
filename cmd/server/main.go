@@ -17,6 +17,7 @@ import (
 	"xray-panel/internal/handlers"
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
+	"xray-panel/internal/subscription"
 	"xray-panel/internal/xray"
 
 	"github.com/go-chi/chi/v5"
@@ -72,6 +73,9 @@ func main() {
 		log.Println("SMTP not configured — verification links will be logged to console")
 	}
 
+	subWorker := subscription.NewWorker(userStore, profileStore, mailer, xrayHolder, cfg.BaseURL)
+	go subWorker.Run(ctx)
+
 	// Шаблоны
 	funcMap := template.FuncMap{
 		"formatBytes": formatBytes,
@@ -97,7 +101,7 @@ func main() {
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, xrayHolder, renderer)
 	payHandler := handlers.NewPayHandler(
-		renderer, tariffStore, receiptStore, userStore, mailer,
+		renderer, tariffStore, receiptStore, userStore, mailer, xrayHolder,
 		cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret,
 	)
 

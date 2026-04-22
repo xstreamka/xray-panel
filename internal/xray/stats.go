@@ -35,7 +35,7 @@ type StatsCollector struct {
 	uuidToUserMu sync.RWMutex
 
 	// disabledUsers — юзеры, чей баланс уже исчерпан в этом цикле enforcement.
-	// Чтобы не спамить DeductTraffic и disconnectUserAll в каждом тике
+	// Чтобы не спамить DeductTraffic и DisconnectUserAll в каждом тике
 	// до ближайшей ресинхронизации.
 	disabledUsers   map[int]bool
 	disabledUsersMu sync.Mutex
@@ -112,11 +112,49 @@ func (s *StatsCollector) InitCumulative(ctx context.Context) {
 	log.Printf("Stats: cumulative initialized for %d profiles", len(profiles))
 }
 
-// UpdateLimit обновляет лимит в кэше (вызывать из админки при смене лимита)
+// UpdateLimit обновляет personal-лимит профиля в кэше.
+// Вызывать из админки при смене лимита существующего профиля.
 func (s *StatsCollector) UpdateLimit(uuid string, limitBytes int64) {
 	s.limitsMu.Lock()
 	s.limits[uuid] = limitBytes
 	s.limitsMu.Unlock()
+}
+
+// RegisterProfile регистрирует только что созданный профиль в кэшах коллектора:
+// mapping UUID → user_id и personal-лимит. Без этого списание с user-баланса
+// для свежего профиля не работало бы до ближайшей ресинхронизации InitCumulative.
+func (s *StatsCollector) RegisterProfile(uuid string, userID int, limitBytes int64) {
+	s.uuidToUserMu.Lock()
+	s.uuidToUser[uuid] = userID
+	s.uuidToUserMu.Unlock()
+
+	s.limitsMu.Lock()
+	s.limits[uuid] = limitBytes
+	s.limitsMu.Unlock()
+
+	// Флаг disabledUsers снимаем: юзер создаёт профиль, значит баланс >0
+	// (это проверяет хендлер). Если снят в этом тике — пусть следующий тик
+	// сразу начнёт списывать дельты.
+	s.disabledUsersMu.Lock()
+	delete(s.disabledUsers, userID)
+	s.disabledUsersMu.Unlock()
+}
+
+// UnregisterProfile удаляет все следы профиля из кэшей. Вызывать при удалении
+// профиля (из дашборда / админки), чтобы старый UUID не числился в статистике
+// и не блокировал следующие списания.
+func (s *StatsCollector) UnregisterProfile(uuid string) {
+	s.uuidToUserMu.Lock()
+	delete(s.uuidToUser, uuid)
+	s.uuidToUserMu.Unlock()
+
+	s.limitsMu.Lock()
+	delete(s.limits, uuid)
+	s.limitsMu.Unlock()
+
+	s.cumulativeMu.Lock()
+	delete(s.cumulative, uuid)
+	s.cumulativeMu.Unlock()
 }
 
 // ResetCumulative сбрасывает кумулятивный счётчик (вызывать при сбросе трафика)
@@ -235,7 +273,7 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 			continue
 		}
 		if remaining <= 0 {
-			s.disconnectUserAll(ctx, uid, "balance exhausted")
+			s.DisconnectUserAll(ctx, uid, "balance exhausted")
 			s.disabledUsersMu.Lock()
 			s.disabledUsers[uid] = true
 			s.disabledUsersMu.Unlock()
@@ -253,10 +291,59 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 	}
 }
 
-// disconnectUserAll отключает все профили юзера по user_id:
+// ReactivateUserAll включает все профили юзера обратно: снимает is_active=false
+// в БД, добавляет UUID в Xray, восстанавливает кэши (uuidToUser, limits) и
+// снимает пометку disabledUsers. Вызывать после успешной оплаты подписки/аддона
+// или админского пополнения баланса. Если профили уже активны — no-op.
+func (s *StatsCollector) ReactivateUserAll(ctx context.Context, userID int) {
+	// Снимаем флаг сразу — следующий тик collectAndEnforce увидит
+	// свежий баланс и начнёт списывать штатно.
+	s.disabledUsersMu.Lock()
+	delete(s.disabledUsers, userID)
+	s.disabledUsersMu.Unlock()
+
+	profiles, err := s.profiles.GetByUserID(ctx, userID)
+	if err != nil {
+		log.Printf("Reactivate: GetByUserID %d: %v", userID, err)
+		return
+	}
+
+	// Обновим кэши для ВСЕХ профилей юзера (в т.ч. уже активных — на случай,
+	// если их personal-лимит изменили).
+	s.uuidToUserMu.Lock()
+	s.limitsMu.Lock()
+	for _, p := range profiles {
+		s.uuidToUser[p.UUID] = p.UserID
+		s.limits[p.UUID] = p.TrafficLimit
+	}
+	s.limitsMu.Unlock()
+	s.uuidToUserMu.Unlock()
+
+	uuids, err := s.profiles.ReactivateAllByUser(ctx, userID)
+	if err != nil {
+		log.Printf("Reactivate: ReactivateAllByUser %d: %v", userID, err)
+		return
+	}
+	if len(uuids) == 0 {
+		return
+	}
+
+	added := 0
+	for _, uuid := range uuids {
+		if err := s.client.AddUser(ctx, uuid, uuid); err != nil {
+			log.Printf("Reactivate: AddUser %s: %v", uuid, err)
+			continue
+		}
+		added++
+	}
+	log.Printf("Reactivate: user=%d — %d/%d profiles returned to Xray", userID, added, len(uuids))
+}
+
+// DisconnectUserAll отключает все профили юзера по user_id:
 // блокирует TCP всех его UUID, удаляет из Xray, снимает is_active в БД.
 // Используется, когда баланс подписки исчерпан или истёк срок подписки.
-func (s *StatsCollector) disconnectUserAll(ctx context.Context, userID int, reason string) {
+// Экспортирован, чтобы подписочный воркер мог вызывать на истёкших юзерах.
+func (s *StatsCollector) DisconnectUserAll(ctx context.Context, userID int, reason string) {
 	profiles, err := s.profiles.GetByUserID(ctx, userID)
 	if err != nil {
 		log.Printf("Enforce: GetByUserID %d: %v", userID, err)

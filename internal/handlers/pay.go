@@ -17,6 +17,7 @@ import (
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
 	"xray-panel/internal/paysign"
+	"xray-panel/internal/xray"
 )
 
 type PayHandler struct {
@@ -25,6 +26,7 @@ type PayHandler struct {
 	receipts      *models.PaymentReceiptStore
 	users         *models.UserStore
 	mailer        *email.Sender
+	xrayHolder    *xray.Holder
 	payServiceURL string
 	panelBaseURL  string
 	webhookSecret string
@@ -48,6 +50,7 @@ func NewPayHandler(
 	receipts *models.PaymentReceiptStore,
 	users *models.UserStore,
 	mailer *email.Sender,
+	xrayHolder *xray.Holder,
 	payServiceURL, panelBaseURL, webhookSecret string,
 ) *PayHandler {
 	return &PayHandler{
@@ -56,6 +59,7 @@ func NewPayHandler(
 		receipts:      receipts,
 		users:         users,
 		mailer:        mailer,
+		xrayHolder:    xrayHolder,
 		payServiceURL: strings.TrimRight(payServiceURL, "/"),
 		panelBaseURL:  strings.TrimRight(panelBaseURL, "/"),
 		webhookSecret: webhookSecret,
@@ -321,10 +325,9 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Webhook: inv_id=%d PAID — user=%d plan=%s kind=%s +%.1f GB (%.2f ₽)",
 		p.InvID, userID, tariff.Code, tariff.Kind, trafficGB, amountRub)
 
-	// Реактивация отключённых профилей (из-за исчерпанного трафика или
-	// истёкшей подписки) НЕ делается здесь. Это ответственность stats.go/
-	// коллектора в Шаге 4 — он в следующем тике увидит, что у юзера снова
-	// есть доступный трафик, и вернёт профили в Xray.
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.ReactivateUserAll(r.Context(), userID)
+	}
 
 	if h.mailer != nil {
 		go h.sendPaymentEmail(userID, p.InvID, tariff, trafficGB, amountRub)
