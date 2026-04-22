@@ -26,10 +26,6 @@ type User struct {
 	VerifyToken   *string    `json:"-"`
 	VerifyExpires *time.Time `json:"-"`
 
-	// Legacy: оставлена на время миграции, в новом коде не использовать.
-	// Все данные уже перенесены в ExtraTrafficBalance при миграции.
-	TrafficBalance int64 `json:"-"`
-
 	// ===== Подписочная модель =====
 	CurrentTariffID     *int       `json:"current_tariff_id"`
 	TariffExpiresAt     *time.Time `json:"tariff_expires_at"`
@@ -45,7 +41,8 @@ type User struct {
 }
 
 // TotalAvailable — сколько трафика осталось списать (room в base + extra).
-func (u *User) TotalAvailable() int64 {
+// Value-receiver, чтобы html/template мог вызвать метод на embedded-значении.
+func (u User) TotalAvailable() int64 {
 	room := u.BaseTrafficLimit - u.BaseTrafficUsed
 	if room < 0 {
 		room = 0
@@ -54,7 +51,7 @@ func (u *User) TotalAvailable() int64 {
 }
 
 // HasActiveSubscription — есть ли активный тариф по дате.
-func (u *User) HasActiveSubscription() bool {
+func (u User) HasActiveSubscription() bool {
 	return u.TariffExpiresAt != nil && u.TariffExpiresAt.After(time.Now())
 }
 
@@ -68,7 +65,6 @@ func NewUserStore(pool *pgxpool.Pool) *UserStore {
 
 // userCols — единый список полей в нужном порядке, чтобы не дублировать SELECT-ы.
 const userCols = `id, username, email, is_admin, is_active, email_verified,
-                  traffic_balance,
                   current_tariff_id, tariff_expires_at,
                   base_traffic_limit, base_traffic_used,
                   extra_traffic_balance, frozen_extra_balance,
@@ -80,7 +76,6 @@ func scanUser(row interface {
 }, u *User) error {
 	return row.Scan(
 		&u.ID, &u.Username, &u.Email, &u.IsAdmin, &u.IsActive, &u.EmailVerified,
-		&u.TrafficBalance,
 		&u.CurrentTariffID, &u.TariffExpiresAt,
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
 		&u.ExtraTrafficBalance, &u.FrozenExtraBalance,
@@ -132,7 +127,6 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 		username,
 	).Scan(
 		&u.ID, &u.Username, &u.Email, &u.IsAdmin, &u.IsActive, &u.EmailVerified,
-		&u.TrafficBalance,
 		&u.CurrentTariffID, &u.TariffExpiresAt,
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
 		&u.ExtraTrafficBalance, &u.FrozenExtraBalance,
@@ -397,25 +391,3 @@ func (s *UserStore) MarkReminderSent(ctx context.Context, userID int, days int) 
 	return err
 }
 
-// ──────────────────────────────────────────────
-//  Admin / legacy
-// ──────────────────────────────────────────────
-
-// AddBalance — используется админкой для "подарка" трафика.
-// В новой модели подарок идёт в extra_traffic_balance.
-// Имя сохранено для обратной совместимости с handlers/admin.go.
-func (s *UserStore) AddBalance(ctx context.Context, userID int, bytes int64) error {
-	return s.AddExtra(ctx, userID, bytes)
-}
-
-// GetBalance — возвращает ТОТАЛ доступного трафика (base room + extra).
-// Используется в старых местах, где хотели "сколько осталось".
-func (s *UserStore) GetBalance(ctx context.Context, userID int) (int64, error) {
-	var remaining int64
-	err := s.pool.QueryRow(ctx,
-		`SELECT (base_traffic_limit - base_traffic_used) + extra_traffic_balance
-		 FROM users WHERE id = $1`,
-		userID,
-	).Scan(&remaining)
-	return remaining, err
-}

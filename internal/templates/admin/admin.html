@@ -61,7 +61,7 @@
     <!-- Баланс и пополнение -->
     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.8rem; padding: 0.5rem; background: #0f172a; border-radius: 6px;">
         <span style="color: #94a3b8; font-size: 0.85rem;">Баланс:</span>
-        <strong data-stat="user-balance">{{formatBytes .TrafficBalance}}</strong>
+        <strong data-stat="user-balance">{{formatBytes .TotalAvailable}}</strong>
         <form method="POST" action="/admin/users/{{.ID}}/balance" style="display: flex; gap: 0.3rem; align-items: center; margin-left: auto;">
             <input type="number" name="add_gb" step="0.5" min="0.5" value="5" placeholder="ГБ"
                 style="width: 70px; padding: 0.2rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem;">

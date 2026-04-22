@@ -17,7 +17,6 @@ var migrations = []string{
 		email_verified BOOLEAN DEFAULT FALSE,
 		verify_token  VARCHAR(64),
 		verify_expires TIMESTAMPTZ,
-		traffic_balance BIGINT DEFAULT 0,
 		created_at    TIMESTAMPTZ DEFAULT NOW(),
 		updated_at    TIMESTAMPTZ DEFAULT NOW()
 	)`,
@@ -56,12 +55,6 @@ var migrations = []string{
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token VARCHAR(64);
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_expires TIMESTAMPTZ;
-	EXCEPTION WHEN others THEN NULL;
-	END $$`,
-
-	// traffic_balance — баланс гигабайт (в байтах)
-	`DO $$ BEGIN
-		ALTER TABLE users ADD COLUMN IF NOT EXISTS traffic_balance BIGINT DEFAULT 0;
 	EXCEPTION WHEN others THEN NULL;
 	END $$`,
 
@@ -145,10 +138,9 @@ END $$`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_5d_sent_at TIMESTAMPTZ`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_1d_sent_at TIMESTAMPTZ`,
 
-	// Перенос legacy-баланса в extra_traffic_balance (идемпотентно)
-	`UPDATE users
- SET extra_traffic_balance = traffic_balance
- WHERE traffic_balance > 0 AND extra_traffic_balance = 0`,
+	// Снос legacy-колонки: данные уже перенесены в extra_traffic_balance
+	// более ранней миграцией (на существующих БД). На чистых БД — no-op.
+	`ALTER TABLE users DROP COLUMN IF EXISTS traffic_balance`,
 
 	// Индекс для крона обработки истёкших подписок
 	`CREATE INDEX IF NOT EXISTS idx_users_tariff_expires

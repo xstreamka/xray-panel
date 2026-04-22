@@ -252,7 +252,7 @@ func (h *AdminHandler) AddBalance(w http.ResponseWriter, r *http.Request) {
 
 	addBytes := int64(addGB * 1024 * 1024 * 1024)
 
-	if err := h.users.AddBalance(r.Context(), userID, addBytes); err != nil {
+	if err := h.users.AddExtra(r.Context(), userID, addBytes); err != nil {
 		log.Printf("Admin: add balance error for user %d: %v", userID, err)
 		http.Error(w, "Ошибка пополнения баланса", http.StatusInternalServerError)
 		return
@@ -315,7 +315,7 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	for _, u := range users {
 		uv := adminUserStatsJSON{
 			UserID:     u.ID,
-			BalanceFmt: formatBytesGo(u.TrafficBalance),
+			BalanceFmt: formatBytesGo(u.TotalAvailable()),
 		}
 		var totalTraffic int64
 		for _, p := range profilesByUser[u.ID] {
