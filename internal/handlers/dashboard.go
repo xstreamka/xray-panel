@@ -235,10 +235,11 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// Кэш лимита профиля в коллекторе (0 = без лимита).
-	// В Шаге 4 смысл enforce изменится, но API метода не меняется.
+	// Регистрируем профиль в кэшах коллектора: uuid→user_id + personal-лимит.
+	// Без этого списание трафика с user-баланса для свежего профиля не работало бы
+	// до ближайшей ресинхронизации (раз в минуту).
 	if collector := h.xrayHolder.GetCollector(); collector != nil {
-		collector.UpdateLimit(newUUID, limitBytes)
+		collector.RegisterProfile(newUUID, user.ID, limitBytes)
 	}
 
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
@@ -277,6 +278,10 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 		if err := client.RemoveUser(r.Context(), target.UUID); err != nil {
 			log.Printf("Warning: failed to remove user from Xray: %v", err)
 		}
+	}
+
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.UnregisterProfile(target.UUID)
 	}
 
 	if _, err := h.profiles.Delete(r.Context(), id); err != nil {

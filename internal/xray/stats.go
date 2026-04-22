@@ -112,11 +112,49 @@ func (s *StatsCollector) InitCumulative(ctx context.Context) {
 	log.Printf("Stats: cumulative initialized for %d profiles", len(profiles))
 }
 
-// UpdateLimit обновляет лимит в кэше (вызывать из админки при смене лимита)
+// UpdateLimit обновляет personal-лимит профиля в кэше.
+// Вызывать из админки при смене лимита существующего профиля.
 func (s *StatsCollector) UpdateLimit(uuid string, limitBytes int64) {
 	s.limitsMu.Lock()
 	s.limits[uuid] = limitBytes
 	s.limitsMu.Unlock()
+}
+
+// RegisterProfile регистрирует только что созданный профиль в кэшах коллектора:
+// mapping UUID → user_id и personal-лимит. Без этого списание с user-баланса
+// для свежего профиля не работало бы до ближайшей ресинхронизации InitCumulative.
+func (s *StatsCollector) RegisterProfile(uuid string, userID int, limitBytes int64) {
+	s.uuidToUserMu.Lock()
+	s.uuidToUser[uuid] = userID
+	s.uuidToUserMu.Unlock()
+
+	s.limitsMu.Lock()
+	s.limits[uuid] = limitBytes
+	s.limitsMu.Unlock()
+
+	// Флаг disabledUsers снимаем: юзер создаёт профиль, значит баланс >0
+	// (это проверяет хендлер). Если снят в этом тике — пусть следующий тик
+	// сразу начнёт списывать дельты.
+	s.disabledUsersMu.Lock()
+	delete(s.disabledUsers, userID)
+	s.disabledUsersMu.Unlock()
+}
+
+// UnregisterProfile удаляет все следы профиля из кэшей. Вызывать при удалении
+// профиля (из дашборда / админки), чтобы старый UUID не числился в статистике
+// и не блокировал следующие списания.
+func (s *StatsCollector) UnregisterProfile(uuid string) {
+	s.uuidToUserMu.Lock()
+	delete(s.uuidToUser, uuid)
+	s.uuidToUserMu.Unlock()
+
+	s.limitsMu.Lock()
+	delete(s.limits, uuid)
+	s.limitsMu.Unlock()
+
+	s.cumulativeMu.Lock()
+	delete(s.cumulative, uuid)
+	s.cumulativeMu.Unlock()
 }
 
 // ResetCumulative сбрасывает кумулятивный счётчик (вызывать при сбросе трафика)
