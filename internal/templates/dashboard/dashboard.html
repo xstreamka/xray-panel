@@ -153,6 +153,10 @@
                 <button type="submit" class="btn btn-sm btn-primary" title="Включить профиль">Вкл</button>
             </form>
             {{end}}
+            <form method="POST" action="/dashboard/profiles/{{.ID}}/reset" style="display:inline;"
+                  onsubmit="return confirm('Сбросить трафик профиля? Счётчики устройства обнулятся.');">
+                <button type="submit" class="btn btn-sm" style="background: #475569; color: white;" title="Обнулить счётчики трафика этого устройства">Сброс</button>
+            </form>
             <form method="POST" action="/dashboard/profiles/{{.ID}}/delete" style="display:inline;">
                 <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль? Баланс не изменится — трафик общий на подписку.')">✕</button>
             </form>

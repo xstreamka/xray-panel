@@ -148,6 +148,7 @@ func main() {
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
 		r.Post("/dashboard/profiles/{id}/limit", dashHandler.SetProfileLimit)
 		r.Post("/dashboard/profiles/{id}/toggle", dashHandler.ToggleProfile)
+		r.Post("/dashboard/profiles/{id}/reset", dashHandler.ResetProfileTraffic)
 		r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
 
 		// Оплата (редирект на pay-service)

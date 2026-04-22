@@ -423,6 +423,44 @@ func (h *DashboardHandler) deactivateProfile(ctx context.Context, p *models.VPNP
 	log.Printf("Dashboard: profile %s deactivated by user", p.UUID)
 }
 
+// ResetProfileTraffic — POST /dashboard/profiles/{id}/reset — обнуляет
+// trafic_up / traffic_down профиля. Юзерская фича «чистый старт» для
+// устройств, у которых исчерпан personal-лимит. Общий подписочный баланс
+// юзера не трогает — он считается централизованно в user-модели.
+// Если профиль был отключён по personal-лимиту — реактивируем.
+func (h *DashboardHandler) ResetProfileTraffic(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	profile, err := h.profiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		return
+	}
+
+	if err := h.profiles.ResetTraffic(r.Context(), id); err != nil {
+		log.Printf("Dashboard: reset traffic profile=%d: %v", id, err)
+		http.Error(w, "Ошибка сброса", http.StatusInternalServerError)
+		return
+	}
+
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.ResetCumulative(profile.UUID)
+	}
+
+	if !profile.IsActive {
+		h.reactivateProfile(r.Context(), profile, profile.TrafficLimit)
+	}
+
+	log.Printf("Dashboard: profile %s traffic reset by user", profile.UUID)
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
 func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 	idStr := chi.URLParam(r, "id")
