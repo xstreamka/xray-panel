@@ -94,7 +94,7 @@ func main() {
 
 	authMW := middleware.NewAuthMiddleware(userStore, cfg.SecretKey)
 	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL)
-	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, xrayHolder, cfg, renderer)
+	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, xrayHolder, renderer)
 	payHandler := handlers.NewPayHandler(
 		renderer, tariffStore, receiptStore, userStore, mailer,

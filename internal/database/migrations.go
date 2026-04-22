@@ -111,6 +111,52 @@ var migrations = []string{
 
 	`CREATE INDEX IF NOT EXISTS idx_payment_receipts_user_id ON payment_receipts(user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_payment_receipts_created_at ON payment_receipts(created_at DESC)`,
+
+	// ============================================
+	// Подписочная модель (subscription + addons)
+	// ============================================
+
+	// tariffs: добавляем тип и срок действия
+	`ALTER TABLE tariffs ADD COLUMN IF NOT EXISTS duration_days INT NOT NULL DEFAULT 30`,
+	`ALTER TABLE tariffs ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'subscription'`,
+
+	`DO $$ BEGIN
+    ALTER TABLE tariffs ADD CONSTRAINT tariffs_kind_check
+        CHECK (kind IN ('subscription', 'addon'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$`,
+
+	`DO $$ BEGIN
+    ALTER TABLE tariffs ADD CONSTRAINT tariffs_duration_valid
+        CHECK (
+            (kind = 'subscription' AND duration_days > 0) OR
+            (kind = 'addon')
+        );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$`,
+
+	// users: новые колонки (каждая отдельным statement, никаких DO-блоков)
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS current_tariff_id INTEGER REFERENCES tariffs(id) ON DELETE SET NULL`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS tariff_expires_at TIMESTAMPTZ`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS base_traffic_limit BIGINT NOT NULL DEFAULT 0`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS base_traffic_used BIGINT NOT NULL DEFAULT 0`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_traffic_balance BIGINT NOT NULL DEFAULT 0`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS frozen_extra_balance BIGINT NOT NULL DEFAULT 0`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_5d_sent_at TIMESTAMPTZ`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_1d_sent_at TIMESTAMPTZ`,
+
+	// Перенос legacy-баланса в extra_traffic_balance (идемпотентно)
+	`UPDATE users
+ SET extra_traffic_balance = traffic_balance
+ WHERE traffic_balance > 0 AND extra_traffic_balance = 0`,
+
+	// Индекс для крона обработки истёкших подписок
+	`CREATE INDEX IF NOT EXISTS idx_users_tariff_expires
+    ON users(tariff_expires_at)
+    WHERE tariff_expires_at IS NOT NULL`,
+
+	// payment_receipts: денормализованное поле для фильтрации по виду тарифа
+	`ALTER TABLE payment_receipts ADD COLUMN IF NOT EXISTS tariff_kind VARCHAR(20)`,
 }
 
 func (db *DB) Migrate() error {
@@ -118,10 +164,25 @@ func (db *DB) Migrate() error {
 
 	for i, m := range migrations {
 		if _, err := db.Pool.Exec(ctx, m); err != nil {
-			return fmt.Errorf("migration %d failed: %w", i, err)
+			// Снимем первую строку SQL для удобства в логах
+			firstLine := m
+			if idx := indexByte(firstLine, '\n'); idx > 0 {
+				firstLine = firstLine[:idx]
+			}
+			return fmt.Errorf("migration %d failed: %w\nSQL: %s", i, err, firstLine)
 		}
 	}
 
 	log.Println("Migrations applied successfully")
 	return nil
+}
+
+// Маленький helper, если не хочется тянуть strings ради одной функции
+func indexByte(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
 }

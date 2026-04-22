@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"xray-panel/internal/config"
@@ -23,13 +24,24 @@ import (
 type DashboardHandler struct {
 	profiles   *models.VPNProfileStore
 	users      *models.UserStore
+	tariffs    *models.TariffStore
 	xrayHolder *xray.Holder
 	cfg        *config.Config
 	renderer   *Renderer
 }
 
-func NewDashboardHandler(profiles *models.VPNProfileStore, users *models.UserStore, xrayHolder *xray.Holder, cfg *config.Config, renderer *Renderer) *DashboardHandler {
-	return &DashboardHandler{profiles: profiles, users: users, xrayHolder: xrayHolder, cfg: cfg, renderer: renderer}
+func NewDashboardHandler(
+	profiles *models.VPNProfileStore,
+	users *models.UserStore,
+	tariffs *models.TariffStore,
+	xrayHolder *xray.Holder,
+	cfg *config.Config,
+	renderer *Renderer,
+) *DashboardHandler {
+	return &DashboardHandler{
+		profiles: profiles, users: users, tariffs: tariffs,
+		xrayHolder: xrayHolder, cfg: cfg, renderer: renderer,
+	}
 }
 
 type profileView struct {
@@ -42,10 +54,9 @@ type profileView struct {
 	IsOverLimit   bool
 	IsOnline      bool
 	OnlineIPs     []string
-	Remaining     int64 // остаток лимита в байтах
+	Remaining     int64 // остаток ЛОКАЛЬНОГО лимита профиля (если задан)
 }
 
-// enrichProfiles добавляет live-трафик и онлайн-статус из snapshot или gRPC
 func (h *DashboardHandler) enrichProfiles(ctx context.Context, profiles []models.VPNProfile) (
 	enriched []models.VPNProfile,
 	onlineUsers map[string]bool,
@@ -110,20 +121,20 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 			OnlineIPs:    onlineIPs[p.UUID],
 		}
 
+		// Лимит на профиле — опциональный "родительский контроль".
+		// 0 = без лимита, enforce работает только по балансу юзера.
 		if p.TrafficLimit > 0 {
 			used := v.TrafficTotal
 			v.Remaining = p.TrafficLimit - used
 			if v.Remaining < 0 {
 				v.Remaining = 0
 			}
-
 			pct := int(float64(used) / float64(p.TrafficLimit) * 100)
 			if pct > 100 {
 				pct = 100
 			}
 			v.UsagePercent = pct
 			v.IsOverLimit = used >= p.TrafficLimit
-
 			switch {
 			case pct >= 90:
 				v.ProgressColor = "#ef4444"
@@ -141,15 +152,32 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		views = append(views, v)
 	}
 
-	// Пересчитываем баланс (user может быть stale из cookie)
+	// Свежий юзер для состояния подписки и баланса (cookie может быть stale)
 	freshUser, _ := h.users.GetByID(r.Context(), user.ID)
 	if freshUser != nil {
 		user = freshUser
 	}
 
+	// Имя текущего тарифа (если есть)
+	var tariffLabel string
+	if user.CurrentTariffID != nil {
+		if t, err := h.tariffs.GetByID(r.Context(), *user.CurrentTariffID); err == nil {
+			tariffLabel = t.Label
+		}
+	}
+
+	baseRemaining := user.BaseTrafficLimit - user.BaseTrafficUsed
+	if baseRemaining < 0 {
+		baseRemaining = 0
+	}
+
 	h.renderer.Render(w, "dashboard.html", map[string]any{
-		"User":     user,
-		"Profiles": views,
+		"User":           user,
+		"Profiles":       views,
+		"TariffLabel":    tariffLabel,
+		"BaseRemaining":  baseRemaining,
+		"HasActiveSub":   user.HasActiveSubscription(),
+		"TotalAvailable": user.TotalAvailable(),
 	})
 }
 
@@ -160,36 +188,45 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 		name = "default"
 	}
 
-	// Парсим кол-во ГБ для профиля
-	limitGBStr := r.FormValue("limit_gb")
-	limitGB, err := strconv.ParseFloat(limitGBStr, 64)
-	if err != nil || limitGB <= 0 {
-		http.Error(w, "Укажите количество ГБ для профиля (> 0)", http.StatusBadRequest)
+	// Свежий юзер — для актуальной проверки баланса
+	freshUser, err := h.users.GetByID(r.Context(), user.ID)
+	if err == nil {
+		user = freshUser
+	}
+
+	// В новой модели профиль — это просто устройство. Нет смысла создавать,
+	// если у юзера вообще нет доступного трафика: enforce сразу его отключит.
+	// Поэтому сразу говорим "сначала оплатите".
+	if user.TotalAvailable() <= 0 {
+		http.Error(w, "Нет доступного трафика. Оплатите тариф на странице /pay.",
+			http.StatusBadRequest)
 		return
 	}
 
-	limitBytes := int64(limitGB * 1024 * 1024 * 1024)
-
-	// Списываем с баланса
-	if err := h.users.DeductBalance(r.Context(), user.ID, limitBytes); err != nil {
-		log.Printf("Deduct balance failed for user %d: %v", user.ID, err)
-		http.Error(w, "Недостаточно трафика на балансе. Пополните баланс.", http.StatusBadRequest)
-		return
+	// limit_gb теперь опционален: это ЛОКАЛЬНЫЙ лимит устройства (parental).
+	// Пусто или 0 = без лимита, трафик просто списывается из общего пула юзера.
+	var limitBytes int64
+	if s := strings.TrimSpace(r.FormValue("limit_gb")); s != "" {
+		limitGB, err := strconv.ParseFloat(s, 64)
+		if err != nil || limitGB < 0 {
+			http.Error(w, "Некорректное значение лимита", http.StatusBadRequest)
+			return
+		}
+		limitBytes = int64(limitGB * 1024 * 1024 * 1024)
 	}
 
 	newUUID := uuid.New().String()
 
 	profile, err := h.profiles.Create(r.Context(), user.ID, newUUID, name)
 	if err != nil {
-		// Возвращаем баланс
-		h.users.RefundBalance(r.Context(), user.ID, limitBytes)
 		http.Error(w, "Ошибка создания профиля: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Устанавливаем лимит
-	if err := h.profiles.SetLimit(r.Context(), profile.ID, limitBytes); err != nil {
-		log.Printf("Warning: failed to set limit for profile %d: %v", profile.ID, err)
+	if limitBytes > 0 {
+		if err := h.profiles.SetLimit(r.Context(), profile.ID, limitBytes); err != nil {
+			log.Printf("Warning: failed to set limit for profile %d: %v", profile.ID, err)
+		}
 	}
 
 	if client := h.xrayHolder.Get(); client != nil {
@@ -198,7 +235,8 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// Обновляем лимит в collector
+	// Кэш лимита профиля в коллекторе (0 = без лимита).
+	// В Шаге 4 смысл enforce изменится, но API метода не меняется.
 	if collector := h.xrayHolder.GetCollector(); collector != nil {
 		collector.UpdateLimit(newUUID, limitBytes)
 	}
@@ -228,23 +266,13 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 			break
 		}
 	}
-
 	if target == nil {
 		http.Error(w, "Профиль не найден", http.StatusNotFound)
 		return
 	}
 
-	// Возвращаем неиспользованный трафик на баланс
-	used := target.TrafficUp + target.TrafficDown
-	if target.TrafficLimit > 0 && used < target.TrafficLimit {
-		refund := target.TrafficLimit - used
-		if err := h.users.RefundBalance(r.Context(), user.ID, refund); err != nil {
-			log.Printf("Warning: failed to refund balance for user %d: %v", user.ID, err)
-		} else {
-			log.Printf("Refunded %d bytes to user %d (profile %s)", refund, user.ID, target.UUID)
-		}
-	}
-
+	// В новой модели трафик живёт на юзере, возвращать при удалении нечего.
+	// Просто удаляем профиль из Xray и БД.
 	if client := h.xrayHolder.Get(); client != nil {
 		if err := client.RemoveUser(r.Context(), target.UUID); err != nil {
 			log.Printf("Warning: failed to remove user from Xray: %v", err)
@@ -277,9 +305,25 @@ type profileStatsJSON struct {
 }
 
 type dashStatsJSON struct {
-	Balance    int64              `json:"balance"`
-	BalanceFmt string             `json:"balance_fmt"`
-	Profiles   []profileStatsJSON `json:"profiles"`
+	// Общий доступный трафик: base_room + extra (то, что показываем как "баланс")
+	Balance    int64  `json:"balance"`
+	BalanceFmt string `json:"balance_fmt"`
+	// Детализация для полноценного UI
+	BaseLimit        int64  `json:"base_limit"`
+	BaseLimitFmt     string `json:"base_limit_fmt"`
+	BaseUsed         int64  `json:"base_used"`
+	BaseUsedFmt      string `json:"base_used_fmt"`
+	BaseRemaining    int64  `json:"base_remaining"`
+	BaseRemainingFmt string `json:"base_remaining_fmt"`
+	ExtraBalance     int64  `json:"extra_balance"`
+	ExtraBalanceFmt  string `json:"extra_balance_fmt"`
+	FrozenBalance    int64  `json:"frozen_balance"`
+	FrozenBalanceFmt string `json:"frozen_balance_fmt"`
+	// Подписка
+	TariffExpiresAt *time.Time `json:"tariff_expires_at"`
+	HasActiveSub    bool       `json:"has_active_subscription"`
+
+	Profiles []profileStatsJSON `json:"profiles"`
 }
 
 func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
@@ -293,23 +337,32 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 
 	profiles, onlineUsers, onlineIPs := h.enrichProfiles(r.Context(), profiles)
 
-	// Получаем актуальный баланс
-	balance, _ := h.users.GetBalance(r.Context(), user.ID)
+	// Свежий юзер для актуальных балансов и подписки
+	freshUser, _ := h.users.GetByID(r.Context(), user.ID)
+	if freshUser != nil {
+		user = freshUser
+	}
+
+	baseRem := user.BaseTrafficLimit - user.BaseTrafficUsed
+	if baseRem < 0 {
+		baseRem = 0
+	}
+	total := baseRem + user.ExtraTrafficBalance
 
 	profileStats := make([]profileStatsJSON, 0, len(profiles))
 	for _, p := range profiles {
-		total := p.TrafficUp + p.TrafficDown
+		totalP := p.TrafficUp + p.TrafficDown
 		isExpired := p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now())
-		isOverLimit := p.TrafficLimit > 0 && total >= p.TrafficLimit
+		isOverLimit := p.TrafficLimit > 0 && totalP >= p.TrafficLimit
 
 		s := profileStatsJSON{
 			ID:              p.ID,
 			TrafficUp:       p.TrafficUp,
 			TrafficDown:     p.TrafficDown,
-			TrafficTotal:    total,
+			TrafficTotal:    totalP,
 			TrafficUpFmt:    formatBytesGo(p.TrafficUp),
 			TrafficDownFmt:  formatBytesGo(p.TrafficDown),
-			TrafficTotalFmt: formatBytesGo(total),
+			TrafficTotalFmt: formatBytesGo(totalP),
 			IsOnline:        p.IsActive && onlineUsers[p.UUID],
 			OnlineIPs:       onlineIPs[p.UUID],
 			IsActive:        p.IsActive,
@@ -318,13 +371,12 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if p.TrafficLimit > 0 {
-			pct := int(float64(total) / float64(p.TrafficLimit) * 100)
+			pct := int(float64(totalP) / float64(p.TrafficLimit) * 100)
 			if pct > 100 {
 				pct = 100
 			}
 			s.UsagePercent = pct
 			s.LimitFmt = formatBytesGo(p.TrafficLimit)
-
 			switch {
 			case pct >= 90:
 				s.ProgressColor = "#ef4444"
@@ -339,9 +391,21 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := dashStatsJSON{
-		Balance:    balance,
-		BalanceFmt: formatBytesGo(balance),
-		Profiles:   profileStats,
+		Balance:          total,
+		BalanceFmt:       formatBytesGo(total),
+		BaseLimit:        user.BaseTrafficLimit,
+		BaseLimitFmt:     formatBytesGo(user.BaseTrafficLimit),
+		BaseUsed:         user.BaseTrafficUsed,
+		BaseUsedFmt:      formatBytesGo(user.BaseTrafficUsed),
+		BaseRemaining:    baseRem,
+		BaseRemainingFmt: formatBytesGo(baseRem),
+		ExtraBalance:     user.ExtraTrafficBalance,
+		ExtraBalanceFmt:  formatBytesGo(user.ExtraTrafficBalance),
+		FrozenBalance:    user.FrozenExtraBalance,
+		FrozenBalanceFmt: formatBytesGo(user.FrozenExtraBalance),
+		TariffExpiresAt:  user.TariffExpiresAt,
+		HasActiveSub:     user.HasActiveSubscription(),
+		Profiles:         profileStats,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

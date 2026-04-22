@@ -20,7 +20,7 @@
 <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
     <div>
         <span style="color: #94a3b8;">Баланс трафика:</span>
-        <strong style="font-size: 1.3rem; margin-left: 0.5rem;" id="balance-display">{{formatBytes .User.TrafficBalance}}</strong>
+        <strong style="font-size: 1.3rem; margin-left: 0.5rem;" id="balance-display">{{formatBytes .TotalAvailable}}</strong>
     </div>
     <div style="display: flex; column-gap: 0.5rem;">
         <a href="/pay" class="btn btn-primary">Пополнить</a>
@@ -106,7 +106,7 @@
 {{end}}
 {{else}}
 <div class="card" style="text-align: center; color: #94a3b8;">
-    {{if gt .User.TrafficBalance 0}}
+    {{if gt .TotalAvailable 0}}
         У вас пока нет VPN профилей. Создайте первый!
     {{else}}
         Пополните баланс, чтобы создать VPN профиль.

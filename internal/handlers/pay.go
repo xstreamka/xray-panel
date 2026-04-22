@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"xray-panel/internal/email"
 
+	"xray-panel/internal/email"
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
 	"xray-panel/internal/paysign"
@@ -30,7 +30,6 @@ type PayHandler struct {
 	webhookSecret string
 }
 
-// webhookPayload зеркалит payment.WebhookPayload из pay-service.
 type webhookPayload struct {
 	InvID       int             `json:"inv_id"`
 	ProductType string          `json:"product_type"`
@@ -67,22 +66,42 @@ func (h *PayHandler) Index(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
 	if h.payServiceURL == "" || h.webhookSecret == "" {
-		http.Error(w, "Оплата временно недоступна: PAY_SERVICE_URL или WEBHOOK_SECRET не настроены", http.StatusServiceUnavailable)
+		http.Error(w, "Оплата временно недоступна: PAY_SERVICE_URL или WEBHOOK_SECRET не настроены",
+			http.StatusServiceUnavailable)
 		return
 	}
 
-	tariffs, err := h.tariffs.ListActive(r.Context())
+	// Свежий юзер — для корректной проверки HasActiveSubscription()
+	freshUser, err := h.users.GetByID(r.Context(), user.ID)
+	if err == nil {
+		user = freshUser
+	}
+
+	subPlans, err := h.tariffs.ListActiveByKind(r.Context(), models.TariffKindSubscription)
 	if err != nil {
-		log.Printf("Pay: list tariffs error: %v", err)
+		log.Printf("Pay: list sub tariffs error: %v", err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	addonPlans, err := h.tariffs.ListActiveByKind(r.Context(), models.TariffKindAddon)
+	if err != nil {
+		log.Printf("Pay: list addon tariffs error: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
+	// Для обратной совместимости со старым шаблоном (до UI-рефакторинга в шаге 6)
+	// отдаём также плоский список всех активных тарифов.
+	allPlans := append(append([]models.Tariff{}, subPlans...), addonPlans...)
+
 	h.renderer.Render(w, "pay.html", map[string]any{
-		"User":    user,
-		"Tariffs": tariffs,
-		"Status":  r.URL.Query().Get("payment"),
-		"InvID":   r.URL.Query().Get("inv_id"),
+		"User":         user,
+		"Tariffs":      allPlans, // legacy ключ
+		"SubPlans":     subPlans,
+		"AddonPlans":   addonPlans,
+		"HasActiveSub": user.HasActiveSubscription(),
+		"Status":       r.URL.Query().Get("payment"),
+		"InvID":        r.URL.Query().Get("inv_id"),
 	})
 }
 
@@ -105,8 +124,27 @@ func (h *PayHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Addon можно покупать ТОЛЬКО при активной подписке. Иначе неясно,
+	// куда класть трафик — extra без подписки всё равно уйдёт во frozen
+	// при первом же expire-тике, а новой подписки нет. Защищаем юзера.
+	if tariff.Kind == models.TariffKindAddon {
+		fresh, err := h.users.GetByID(r.Context(), user.ID)
+		if err != nil || !fresh.HasActiveSubscription() {
+			http.Error(w,
+				"Докупка трафика доступна только при активной подписке. "+
+					"Сначала оплатите тарифный план.",
+				http.StatusBadRequest)
+			return
+		}
+	}
+
+	// В metadata теперь кладём больше контекста. Webhook в первую очередь
+	// смотрит в БД (через GetByCode), но эти поля страхуют кейс, когда тариф
+	// был изменён/удалён между checkout и webhook.
 	metadata, _ := json.Marshal(map[string]any{
-		"traffic_gb": tariff.TrafficGB,
+		"traffic_gb":    tariff.TrafficGB,
+		"duration_days": tariff.DurationDays,
+		"kind":          string(tariff.Kind),
 	})
 
 	params := map[string]string{
@@ -131,16 +169,14 @@ func (h *PayHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 	q.Set("sig", sig)
 
 	checkoutURL := h.payServiceURL + "/pay/checkout?" + q.Encode()
-	log.Printf("Pay: user %d (%s) → checkout %s (%.2f ₽)",
-		user.ID, user.Email, tariff.Code, tariff.AmountRub)
+	log.Printf("Pay: user %d (%s) → checkout %s [%s] (%.2f ₽)",
+		user.ID, user.Email, tariff.Code, tariff.Kind, tariff.AmountRub)
 
 	http.Redirect(w, r, checkoutURL, http.StatusSeeOther)
 }
 
 // Webhook — приёмник вебхука от pay-service.
 // POST /api/payments/webhook
-// Заголовок: X-Webhook-Signature: hex(hmac-sha256(body, WEBHOOK_SECRET))
-// Ответ 200 OK — pay-service прекращает ретраи.
 func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	if h.webhookSecret == "" {
 		log.Printf("Webhook: WEBHOOK_SECRET not configured")
@@ -148,15 +184,13 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Читаем raw body — подпись считается от байтов ДО парсинга JSON
-	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10)) // 64 KiB
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
 	if err != nil {
 		log.Printf("Webhook: read body error: %v", err)
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
 	}
 
-	// 2. Проверяем HMAC-SHA256
 	signature := r.Header.Get("X-Webhook-Signature")
 	if signature == "" || !paysign.VerifyBody(body, signature, h.webhookSecret) {
 		log.Printf("Webhook: invalid signature from %s", r.RemoteAddr)
@@ -164,7 +198,6 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Парсим payload
 	var p webhookPayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		log.Printf("Webhook: json decode error: %v", err)
@@ -172,32 +205,26 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Фильтруем неоплаченные статусы — это не ошибка, просто игнор
 	if p.Status != "paid" {
 		log.Printf("Webhook: inv_id=%d status=%s — skipped", p.InvID, p.Status)
 		writeOK(w)
 		return
 	}
 
-	// 5. Только свой product_type
 	if p.ProductType != "vpn" {
 		log.Printf("Webhook: inv_id=%d unknown product_type=%q — skipped",
 			p.InvID, p.ProductType)
-		writeOK(w) // OK, чтобы pay-service не ретраил
+		writeOK(w)
 		return
 	}
 
-	// 6. user_ref → user_id
 	userID, err := strconv.Atoi(p.UserRef)
 	if err != nil || userID <= 0 {
 		log.Printf("Webhook: inv_id=%d invalid user_ref=%q", p.InvID, p.UserRef)
-		// 400 — данные сломаны, ретраить бессмысленно, но pay-service поретраит
-		// и через 3 попытки перестанет. Лучше, чем молча потерять платёж.
 		http.Error(w, "invalid user_ref", http.StatusBadRequest)
 		return
 	}
 
-	// 7. Парсим metadata — там traffic_gb, зафиксированный на момент checkout
 	var meta struct {
 		TrafficGB float64 `json:"traffic_gb"`
 	}
@@ -207,7 +234,6 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 8. Sanity-check: тариф должен существовать (защита от мусорных plan_id)
 	tariff, err := h.tariffs.GetByCode(r.Context(), p.PlanID)
 	if err != nil {
 		log.Printf("Webhook: inv_id=%d unknown plan_id=%q: %v", p.InvID, p.PlanID, err)
@@ -215,7 +241,6 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 9. Определяем, сколько ГБ начислить. Приоритет: metadata → тариф (fallback).
 	trafficGB := meta.TrafficGB
 	if trafficGB <= 0 {
 		log.Printf("Webhook: inv_id=%d metadata.traffic_gb missing, fallback to tariff %q",
@@ -227,15 +252,32 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid traffic amount", http.StatusBadRequest)
 		return
 	}
-
-	// 10. Разумный диапазон — защита от JSON-сюрпризов (0.1 … 10000 ГБ)
 	if trafficGB < 0.1 || trafficGB > 10000 {
 		log.Printf("Webhook: inv_id=%d traffic_gb=%.2f out of range", p.InvID, trafficGB)
 		http.Error(w, "invalid traffic amount", http.StatusBadRequest)
 		return
 	}
 
-	// 11. Сумма — всегда из payload (это что реально списалось)
+	// Повторная валидация для addon: если тариф аддоновский, у юзера на
+	// момент ОПЛАТЫ должна быть активная подписка. Защита от редкого кейса,
+	// когда подписка истекла между checkout и оплатой.
+	if tariff.Kind == models.TariffKindAddon {
+		u, err := h.users.GetByID(r.Context(), userID)
+		if err != nil {
+			log.Printf("Webhook: inv_id=%d user %d not found: %v", p.InvID, userID, err)
+			http.Error(w, "user not found", http.StatusBadRequest)
+			return
+		}
+		if !u.HasActiveSubscription() {
+			// Не 400! Это оплаченный платёж — нужно его учесть как обычное
+			// пополнение extra. ApplyPayment это сделает в ветке addon.
+			// Юзер получит трафик, но extra может уйти в frozen при ближайшем
+			// истечении. В логе — warning, чтобы можно было расследовать.
+			log.Printf("Webhook: inv_id=%d WARN addon paid by user %d without active subscription",
+				p.InvID, userID)
+		}
+	}
+
 	amountRub := p.Amount
 	if amountRub <= 0 {
 		log.Printf("Webhook: inv_id=%d invalid amount=%.2f", p.InvID, amountRub)
@@ -250,61 +292,74 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 		paidAt = time.Now()
 	}
 
-	// 12. Атомарно: квитанция + баланс
 	receipt := &models.PaymentReceipt{
 		InvID:        p.InvID,
 		UserID:       userID,
 		PlanID:       tariff.Code,
-		AmountRub:    amountRub,    // ← из payload
-		TrafficBytes: trafficBytes, // ← из metadata
+		AmountRub:    amountRub,
+		TrafficBytes: trafficBytes,
 		PaidAt:       paidAt,
 		RawPayload:   body,
 	}
 
-	err = h.receipts.CreditBalance(r.Context(), receipt)
+	// ApplyPayment сам выбирает ветку по tariff.Kind:
+	//   subscription → продление/активация + сброс base + разморозка extra
+	//   addon        → просто +extra_traffic_balance
+	// Всё атомарно в одной транзакции.
+	err = h.receipts.ApplyPayment(r.Context(), receipt, tariff)
 	switch {
 	case errors.Is(err, models.ErrReceiptExists):
-		// Идемпотентный повтор — это нормально, просто OK
 		log.Printf("Webhook: inv_id=%d already processed (idempotent)", p.InvID)
 		writeOK(w)
 		return
 	case err != nil:
-		log.Printf("Webhook: inv_id=%d credit error: %v", p.InvID, err)
-		// 500 → pay-service поретраит через 2/5/10 сек — шанс восстановиться
+		log.Printf("Webhook: inv_id=%d apply error: %v", p.InvID, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Webhook: inv_id=%d PAID — user=%d plan=%s +%.1f GB (%.2f ₽)",
-		p.InvID, userID, tariff.Code, trafficGB, amountRub)
+	log.Printf("Webhook: inv_id=%d PAID — user=%d plan=%s kind=%s +%.1f GB (%.2f ₽)",
+		p.InvID, userID, tariff.Code, tariff.Kind, trafficGB, amountRub)
+
+	// Реактивация отключённых профилей (из-за исчерпанного трафика или
+	// истёкшей подписки) НЕ делается здесь. Это ответственность stats.go/
+	// коллектора в Шаге 4 — он в следующем тике увидит, что у юзера снова
+	// есть доступный трафик, и вернёт профили в Xray.
 
 	if h.mailer != nil {
-		go h.sendTopupEmail(userID, p.InvID, trafficGB, amountRub)
+		go h.sendPaymentEmail(userID, p.InvID, tariff, trafficGB, amountRub)
 	}
 
 	writeOK(w)
 }
 
-func (h *PayHandler) sendTopupEmail(userID, invID int, trafficGB, amountRub float64) {
+func (h *PayHandler) sendPaymentEmail(
+	userID, invID int, tariff *models.Tariff,
+	trafficGB, amountRub float64,
+) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	u, err := h.users.GetByID(ctx, userID)
 	if err != nil {
-		log.Printf("Topup mail: get user %d failed: %v", userID, err)
+		log.Printf("Payment mail: get user %d failed: %v", userID, err)
 		return
 	}
 
+	// TODO(шаг 6 / email): заменить на отдельные SendSubscriptionNotification /
+	// SendAddonNotification с разными текстами письма. Пока используем старый
+	// шаблон — он корректно расскажет про начисленные ГБ и сумму, но не
+	// упомянет срок подписки. Для MVP этого достаточно.
 	if err := h.mailer.SendTopupNotification(
 		u.Email, u.Username, trafficGB, amountRub, invID, h.panelBaseURL,
 	); err != nil {
-		log.Printf("Topup mail: send to %s failed: %v", u.Email, err)
+		log.Printf("Payment mail: send to %s failed: %v", u.Email, err)
 		return
 	}
-	log.Printf("Topup mail: sent to %s (user %d, inv_id=%d)", u.Email, userID, invID)
+	log.Printf("Payment mail: sent to %s (user %d, inv_id=%d, kind=%s)",
+		u.Email, userID, invID, tariff.Kind)
 }
 
-// History — GET /pay/history — список пополнений пользователя
 func (h *PayHandler) History(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 

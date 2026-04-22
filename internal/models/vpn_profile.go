@@ -133,20 +133,28 @@ func (s *VPNProfileStore) Delete(ctx context.Context, id int) (string, error) {
 	return uuid, nil
 }
 
-// GetAllActiveUUIDs — для восстановления пользователей при старте Xray
+// GetAllActiveUUIDs — UUID профилей, которые должны быть ВКЛЮЧЕНЫ в Xray.
+//
+// Условия активности:
+//   - profile.is_active = TRUE
+//   - user.is_active = TRUE
+//   - expires_at NULL или в будущем
+//   - у юзера есть доступный трафик: (base_limit - base_used) + extra > 0
+//   - если у профиля задан personal limit (traffic_limit > 0) — не превышен
 func (s *VPNProfileStore) GetAllActiveUUIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT vp.uuid FROM vpn_profiles vp
-		 JOIN users u ON u.id = vp.user_id
-		 WHERE vp.is_active = TRUE AND u.is_active = TRUE
-		   AND (vp.expires_at IS NULL OR vp.expires_at > NOW())
-		   AND (vp.traffic_limit = 0 OR vp.traffic_up + vp.traffic_down < vp.traffic_limit)`,
+		`SELECT p.uuid FROM vpn_profiles p
+		 JOIN users u ON u.id = p.user_id
+		 WHERE p.is_active = TRUE
+		   AND u.is_active = TRUE
+		   AND (p.expires_at IS NULL OR p.expires_at > NOW())
+		   AND (u.base_traffic_limit - u.base_traffic_used) + u.extra_traffic_balance > 0
+		   AND (p.traffic_limit = 0 OR p.traffic_up + p.traffic_down < p.traffic_limit)`,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var uuids []string
 	for rows.Next() {
 		var uuid string
@@ -158,21 +166,22 @@ func (s *VPNProfileStore) GetAllActiveUUIDs(ctx context.Context) ([]string, erro
 	return uuids, nil
 }
 
-// GetAllInactiveUUIDs — UUID профилей, которые НЕ должны быть активны в Xray
+// GetAllInactiveUUIDs — UUID профилей, которые должны быть ОТКЛЮЧЕНЫ.
+// Симметрично GetAllActiveUUIDs, для sync при старте Xray.
 func (s *VPNProfileStore) GetAllInactiveUUIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT vp.uuid FROM vpn_profiles vp
-		 JOIN users u ON u.id = vp.user_id
-		 WHERE vp.is_active = FALSE
+		`SELECT p.uuid FROM vpn_profiles p
+		 JOIN users u ON u.id = p.user_id
+		 WHERE p.is_active = FALSE
 		    OR u.is_active = FALSE
-		    OR (vp.expires_at IS NOT NULL AND vp.expires_at <= NOW())
-		    OR (vp.traffic_limit > 0 AND vp.traffic_up + vp.traffic_down >= vp.traffic_limit)`,
+		    OR (p.expires_at IS NOT NULL AND p.expires_at <= NOW())
+		    OR (u.base_traffic_limit - u.base_traffic_used) + u.extra_traffic_balance <= 0
+		    OR (p.traffic_limit > 0 AND p.traffic_up + p.traffic_down >= p.traffic_limit)`,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var uuids []string
 	for rows.Next() {
 		var uuid string
@@ -184,27 +193,33 @@ func (s *VPNProfileStore) GetAllInactiveUUIDs(ctx context.Context) ([]string, er
 	return uuids, nil
 }
 
-// GetExceeded — активные профили, превысившие лимит или с истёкшим сроком
+// GetExceeded переработан. Теперь возвращает профили, которые СЕЙЧАС активны
+// в БД, но должны быть отключены. Используется stats.go для выявления того,
+// кого пора вырубить через gRPC.
 func (s *VPNProfileStore) GetExceeded(ctx context.Context) ([]VPNProfile, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT p.id, p.user_id, p.uuid, p.name, p.is_active, p.traffic_up, p.traffic_down, p.traffic_limit, p.expires_at, p.created_at, p.updated_at
+		`SELECT p.id, p.user_id, p.uuid, p.name, p.is_active,
+		        p.traffic_up, p.traffic_down, p.traffic_limit, p.expires_at,
+		        p.created_at, p.updated_at
 		 FROM vpn_profiles p
+		 JOIN users u ON u.id = p.user_id
 		 WHERE p.is_active = TRUE
 		   AND (
-		     (p.traffic_limit > 0 AND p.traffic_up + p.traffic_down >= p.traffic_limit)
-		     OR
 		     (p.expires_at IS NOT NULL AND p.expires_at <= NOW())
+		     OR (u.base_traffic_limit - u.base_traffic_used) + u.extra_traffic_balance <= 0
+		     OR (p.traffic_limit > 0 AND p.traffic_up + p.traffic_down >= p.traffic_limit)
 		   )`,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var profiles []VPNProfile
 	for rows.Next() {
 		var p VPNProfile
-		if err := rows.Scan(&p.ID, &p.UserID, &p.UUID, &p.Name, &p.IsActive, &p.TrafficUp, &p.TrafficDown, &p.TrafficLimit, &p.ExpiresAt, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.UserID, &p.UUID, &p.Name, &p.IsActive,
+			&p.TrafficUp, &p.TrafficDown, &p.TrafficLimit, &p.ExpiresAt,
+			&p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		profiles = append(profiles, p)
@@ -237,4 +252,54 @@ func (s *VPNProfileStore) ResetTraffic(ctx context.Context, id int) error {
 		`UPDATE vpn_profiles SET traffic_up = 0, traffic_down = 0, updated_at = NOW() WHERE id = $1`, id,
 	)
 	return err
+}
+
+// DeactivateAllByUser помечает все активные профили юзера как inactive в БД.
+// Это не отключает их в Xray — отключение gRPC-вызовом делает stats-коллектор.
+// Возвращает список UUID, которые были отключены.
+func (s *VPNProfileStore) DeactivateAllByUser(ctx context.Context, userID int) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`UPDATE vpn_profiles SET is_active = FALSE, updated_at = NOW()
+		 WHERE user_id = $1 AND is_active = TRUE
+		 RETURNING uuid`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var uuids []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			return nil, err
+		}
+		uuids = append(uuids, uuid)
+	}
+	return uuids, nil
+}
+
+// ReactivateAllByUser включает все профили юзера (после успешного продления).
+// Сбрасывает их персональные счётчики? — НЕТ. traffic_up/down считаются кумулятивно
+// за всё время жизни профиля, сброс только через админку вручную.
+func (s *VPNProfileStore) ReactivateAllByUser(ctx context.Context, userID int) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`UPDATE vpn_profiles SET is_active = TRUE, updated_at = NOW()
+		 WHERE user_id = $1 AND is_active = FALSE
+		 RETURNING uuid`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var uuids []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			return nil, err
+		}
+		uuids = append(uuids, uuid)
+	}
+	return uuids, nil
 }
