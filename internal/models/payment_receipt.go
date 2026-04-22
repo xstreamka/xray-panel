@@ -81,8 +81,8 @@ func (s *PaymentReceiptStore) ApplyPayment(
 			    current_tariff_id = $1,
 			    tariff_expires_at = CASE
 			        WHEN tariff_expires_at IS NOT NULL AND tariff_expires_at > NOW()
-			            THEN tariff_expires_at + ($2 || ' days')::INTERVAL
-			        ELSE NOW() + ($2 || ' days')::INTERVAL
+			            THEN tariff_expires_at + make_interval(days => $2)
+			        ELSE NOW() + make_interval(days => $2)
 			    END,
 			    base_traffic_limit    = $3,
 			    base_traffic_used     = 0,

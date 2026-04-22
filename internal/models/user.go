@@ -235,8 +235,8 @@ func (s *UserStore) RenewSubscription(
 		    current_tariff_id = $1,
 		    tariff_expires_at = CASE
 		        WHEN tariff_expires_at IS NOT NULL AND tariff_expires_at > NOW()
-		            THEN tariff_expires_at + ($2 || ' days')::INTERVAL
-		        ELSE NOW() + ($2 || ' days')::INTERVAL
+		            THEN tariff_expires_at + make_interval(days => $2)
+		        ELSE NOW() + make_interval(days => $2)
 		    END,
 		    base_traffic_limit    = $3,
 		    base_traffic_used     = 0,
@@ -360,7 +360,7 @@ func (s *UserStore) UsersForReminder(ctx context.Context, days int) ([]User, err
 	}
 	q := `SELECT ` + userCols + ` FROM users
 	      WHERE tariff_expires_at IS NOT NULL
-	        AND tariff_expires_at BETWEEN NOW() AND NOW() + ($1 || ' days')::INTERVAL
+	        AND tariff_expires_at BETWEEN NOW() AND NOW() + make_interval(days => $1)
 	        AND ` + column + ` IS NULL
 	        AND is_active = TRUE`
 	rows, err := s.pool.Query(ctx, q, days)
