@@ -16,34 +16,94 @@
 {{define "content"}}
 <h1 style="margin: 1.5rem 0;">Мои VPN профили</h1>
 
-<!-- Баланс -->
-<div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-    <div>
-        <span style="color: #94a3b8;">Баланс трафика:</span>
-        <strong style="font-size: 1.3rem; margin-left: 0.5rem;" id="balance-display">{{formatBytes .TotalAvailable}}</strong>
+<!-- Тариф и подписка -->
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+            <span style="color: #94a3b8; font-size: 0.9rem;">Тариф:</span>
+            {{if .HasActiveSub}}
+                <strong style="font-size: 1.1rem;" data-stat="tariff-label">{{.TariffLabel}}</strong>
+                <span class="badge badge-green" data-stat="sub-badge">активна</span>
+            {{else if .TariffLabel}}
+                <strong style="font-size: 1.1rem;" data-stat="tariff-label">{{.TariffLabel}}</strong>
+                <span class="badge badge-red" data-stat="sub-badge">истёк</span>
+            {{else}}
+                <strong style="font-size: 1.1rem; color: #94a3b8;" data-stat="tariff-label">—</strong>
+                <span class="badge badge-gray" data-stat="sub-badge">нет подписки</span>
+            {{end}}
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="/pay" class="btn btn-primary">{{if .HasActiveSub}}Продлить{{else}}Оформить{{end}}</a>
+            <a href="/pay/history" class="btn btn-primary">История</a>
+        </div>
     </div>
-    <div style="display: flex; column-gap: 0.5rem;">
-        <a href="/pay" class="btn btn-primary">Пополнить</a>
-        <a href="/pay/history" class="btn btn-primary">История</a>
+
+    {{if and .HasActiveSub .User.TariffExpiresAt}}
+    <div style="display: flex; gap: 1.2rem; color: #94a3b8; font-size: 0.85rem; margin-bottom: 1rem; flex-wrap: wrap;">
+        <span>Действует до: <strong style="color: #e2e8f0;" data-stat="expires-at">{{.User.TariffExpiresAt.Format "02.01.2006"}}</strong></span>
+        <span data-stat="days-left-line">
+            Осталось: <strong style="color: {{if lt .DaysLeft 3}}#f59e0b{{else}}#e2e8f0{{end}};">{{.DaysLeft}} дн.</strong>
+        </span>
+    </div>
+    {{end}}
+
+    {{if gt .User.BaseTrafficLimit 0}}
+    <div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
+            <span>Базовый трафик подписки</span>
+            <span><strong style="color: #e2e8f0;" data-stat="base-used">{{formatBytes .User.BaseTrafficUsed}}</strong> / <span data-stat="base-limit">{{formatBytes .User.BaseTrafficLimit}}</span></span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 6px; overflow: hidden;">
+            <div data-stat="base-bar" style="background: {{if ge .BasePercent 90}}#ef4444{{else if ge .BasePercent 70}}#f59e0b{{else}}#22c55e{{end}}; width: {{.BasePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+        </div>
+    </div>
+    {{end}}
+
+    <div style="display: flex; gap: 1.2rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #334155; flex-wrap: wrap; font-size: 0.9rem;">
+        <div>
+            <div style="color: #94a3b8; font-size: 0.8rem;">Всего доступно</div>
+            <strong style="font-size: 1.2rem;" id="balance-display">{{formatBytes .TotalAvailable}}</strong>
+        </div>
+        {{if gt .User.ExtraTrafficBalance 0}}
+        <div data-stat="extra-block">
+            <div style="color: #94a3b8; font-size: 0.8rem;">Докупленный</div>
+            <strong style="font-size: 1.1rem; color: #fcd34d;" data-stat="extra-balance">{{formatBytes .User.ExtraTrafficBalance}}</strong>
+        </div>
+        {{else}}
+        <div data-stat="extra-block" style="display: none;">
+            <div style="color: #94a3b8; font-size: 0.8rem;">Докупленный</div>
+            <strong style="font-size: 1.1rem; color: #fcd34d;" data-stat="extra-balance">0 B</strong>
+        </div>
+        {{end}}
+        {{if gt .User.FrozenExtraBalance 0}}
+        <div data-stat="frozen-block" title="Трафик сохранится до следующей оплаты подписки">
+            <div style="color: #94a3b8; font-size: 0.8rem;">❄ Заморожено</div>
+            <strong style="font-size: 1.1rem; color: #60a5fa;" data-stat="frozen-balance">{{formatBytes .User.FrozenExtraBalance}}</strong>
+        </div>
+        {{else}}
+        <div data-stat="frozen-block" style="display: none;" title="Трафик сохранится до следующей оплаты подписки">
+            <div style="color: #94a3b8; font-size: 0.8rem;">❄ Заморожено</div>
+            <strong style="font-size: 1.1rem; color: #60a5fa;" data-stat="frozen-balance">0 B</strong>
+        </div>
+        {{end}}
     </div>
 </div>
 
 <!-- Создание профиля -->
 <div class="card">
-    <form method="POST" action="/dashboard/profiles" style="display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;">
+    <form method="POST" action="/dashboard/profiles" style="display: flex; gap: 0.8rem; align-items: end; flex-wrap: wrap;">
         <div style="flex: 1; min-width: 150px;">
             <label for="name">Имя профиля</label>
             <input type="text" id="name" name="name" placeholder="phone, laptop, ..." style="margin-bottom: 0;">
         </div>
-        <div style="min-width: 120px;">
-            <label for="limit_gb">Выделить ГБ</label>
-            <input type="number" id="limit_gb" name="limit_gb" step="0.5" min="0.5" value="5" required
-                style="margin-bottom: 0; width: 100%; padding: 0.6rem; border: 1px solid #334155; border-radius: 6px; background: #0f172a; color: #e2e8f0; font-size: 1rem;">
+        <div style="min-width: 140px;">
+            <label for="limit_gb">Личный лимит, ГБ</label>
+            <input type="number" id="limit_gb" name="limit_gb" step="0.5" min="0" value="0" style="margin-bottom: 0;">
         </div>
         <button type="submit" class="btn btn-primary">Создать профиль</button>
     </form>
-    <p style="color: #64748b; font-size: 0.8rem; margin-top: 0.5rem;">
-        ГБ списываются с баланса. При удалении профиля неиспользованный трафик возвращается.
+    <p style="color: #64748b; font-size: 0.8rem; margin-top: 0.6rem;">
+        Трафик всех профилей списывается из общего баланса подписки. Личный лимит — опционально, для ограничения конкретного устройства (0 = без лимита).
     </p>
 </div>
 
@@ -73,7 +133,7 @@
             <button class="btn btn-sm btn-primary" onclick="copyURI(this)" data-uri="{{.VlessURI}}">Копировать</button>
             <button class="btn btn-sm btn-primary" onclick="showQR(this)" data-uri="{{.VlessURI}}">QR</button>
             <form method="POST" action="/dashboard/profiles/{{.ID}}/delete" style="display:inline;">
-                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль? Неиспользованный трафик вернётся на баланс.')">✕</button>
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль? Баланс не изменится — трафик общий на подписку.')">✕</button>
             </form>
         </div>
     </div>
@@ -108,8 +168,10 @@
 <div class="card" style="text-align: center; color: #94a3b8;">
     {{if gt .TotalAvailable 0}}
         У вас пока нет VPN профилей. Создайте первый!
+    {{else if .HasActiveSub}}
+        Базовый трафик подписки исчерпан. Докупите пакет на странице оплаты.
     {{else}}
-        Пополните баланс, чтобы создать VPN профиль.
+        Оформите подписку, чтобы создать VPN профиль.
     {{end}}
 </div>
 {{end}}
@@ -147,9 +209,68 @@ function refreshStats() {
     fetch('/dashboard/stats')
         .then(r => r.json())
         .then(data => {
-            // Обновляем баланс
+            // Баланс (общий)
             const balanceEl = document.getElementById('balance-display');
             if (balanceEl && data.balance_fmt) balanceEl.textContent = data.balance_fmt;
+
+            // Подписка: название, статус, срок, дни
+            const tariffLabelEl = document.querySelector('[data-stat="tariff-label"]');
+            const subBadgeEl = document.querySelector('[data-stat="sub-badge"]');
+            if (tariffLabelEl) {
+                tariffLabelEl.textContent = data.tariff_label || '—';
+                tariffLabelEl.style.color = data.tariff_label ? '' : '#94a3b8';
+            }
+            if (subBadgeEl) {
+                if (data.has_active_subscription) {
+                    subBadgeEl.className = 'badge badge-green';
+                    subBadgeEl.textContent = 'активна';
+                } else if (data.tariff_label) {
+                    subBadgeEl.className = 'badge badge-red';
+                    subBadgeEl.textContent = 'истёк';
+                } else {
+                    subBadgeEl.className = 'badge badge-gray';
+                    subBadgeEl.textContent = 'нет подписки';
+                }
+            }
+
+            const expiresEl = document.querySelector('[data-stat="expires-at"]');
+            if (expiresEl && data.tariff_expires_at) {
+                const d = new Date(data.tariff_expires_at);
+                expiresEl.textContent = d.toLocaleDateString('ru-RU',
+                    { day: '2-digit', month: '2-digit', year: 'numeric' });
+            }
+            const daysLine = document.querySelector('[data-stat="days-left-line"]');
+            if (daysLine) {
+                const strong = daysLine.querySelector('strong');
+                if (strong) {
+                    strong.textContent = (data.days_left || 0) + ' дн.';
+                    strong.style.color = data.days_left < 3 ? '#f59e0b' : '#e2e8f0';
+                }
+            }
+
+            // Прогресс базового трафика
+            const baseUsedEl = document.querySelector('[data-stat="base-used"]');
+            const baseLimitEl = document.querySelector('[data-stat="base-limit"]');
+            const baseBar = document.querySelector('[data-stat="base-bar"]');
+            if (baseUsedEl) baseUsedEl.textContent = data.base_used_fmt;
+            if (baseLimitEl) baseLimitEl.textContent = data.base_limit_fmt;
+            if (baseBar && data.base_limit > 0) {
+                const used = Math.min(data.base_used, data.base_limit);
+                const pct = Math.round(used / data.base_limit * 100);
+                baseBar.style.width = pct + '%';
+                baseBar.style.background = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#22c55e';
+            }
+
+            // Extra / Frozen блоки
+            const extraBlock = document.querySelector('[data-stat="extra-block"]');
+            const extraEl = document.querySelector('[data-stat="extra-balance"]');
+            if (extraBlock) extraBlock.style.display = data.extra_balance > 0 ? '' : 'none';
+            if (extraEl) extraEl.textContent = data.extra_balance_fmt;
+
+            const frozenBlock = document.querySelector('[data-stat="frozen-block"]');
+            const frozenEl = document.querySelector('[data-stat="frozen-balance"]');
+            if (frozenBlock) frozenBlock.style.display = data.frozen_balance > 0 ? '' : 'none';
+            if (frozenEl) frozenEl.textContent = data.frozen_balance_fmt;
 
             (data.profiles || []).forEach(s => {
                 const card = document.querySelector(`[data-profile-id="${s.id}"]`);

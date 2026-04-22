@@ -171,11 +171,30 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		baseRemaining = 0
 	}
 
+	var basePercent int
+	if user.BaseTrafficLimit > 0 {
+		used := user.BaseTrafficUsed
+		if used > user.BaseTrafficLimit {
+			used = user.BaseTrafficLimit
+		}
+		basePercent = int(float64(used) / float64(user.BaseTrafficLimit) * 100)
+	}
+
+	var daysLeft int
+	if user.TariffExpiresAt != nil {
+		d := time.Until(*user.TariffExpiresAt).Hours() / 24
+		if d > 0 {
+			daysLeft = int(d) + 1
+		}
+	}
+
 	h.renderer.Render(w, "dashboard.html", map[string]any{
 		"User":           user,
 		"Profiles":       views,
 		"TariffLabel":    tariffLabel,
 		"BaseRemaining":  baseRemaining,
+		"BasePercent":    basePercent,
+		"DaysLeft":       daysLeft,
 		"HasActiveSub":   user.HasActiveSubscription(),
 		"TotalAvailable": user.TotalAvailable(),
 	})
@@ -325,7 +344,9 @@ type dashStatsJSON struct {
 	FrozenBalance    int64  `json:"frozen_balance"`
 	FrozenBalanceFmt string `json:"frozen_balance_fmt"`
 	// Подписка
+	TariffLabel     string     `json:"tariff_label"`
 	TariffExpiresAt *time.Time `json:"tariff_expires_at"`
+	DaysLeft        int        `json:"days_left"`
 	HasActiveSub    bool       `json:"has_active_subscription"`
 
 	Profiles []profileStatsJSON `json:"profiles"`
@@ -395,6 +416,21 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		profileStats = append(profileStats, s)
 	}
 
+	var tariffLabel string
+	if user.CurrentTariffID != nil {
+		if t, err := h.tariffs.GetByID(r.Context(), *user.CurrentTariffID); err == nil {
+			tariffLabel = t.Label
+		}
+	}
+
+	var daysLeft int
+	if user.TariffExpiresAt != nil {
+		d := time.Until(*user.TariffExpiresAt).Hours() / 24
+		if d > 0 {
+			daysLeft = int(d) + 1 // округляем вверх: "осталось 3 дня", даже если это 2.1
+		}
+	}
+
 	result := dashStatsJSON{
 		Balance:          total,
 		BalanceFmt:       formatBytesGo(total),
@@ -408,7 +444,9 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		ExtraBalanceFmt:  formatBytesGo(user.ExtraTrafficBalance),
 		FrozenBalance:    user.FrozenExtraBalance,
 		FrozenBalanceFmt: formatBytesGo(user.FrozenExtraBalance),
+		TariffLabel:      tariffLabel,
 		TariffExpiresAt:  user.TariffExpiresAt,
+		DaysLeft:         daysLeft,
 		HasActiveSub:     user.HasActiveSubscription(),
 		Profiles:         profileStats,
 	}
