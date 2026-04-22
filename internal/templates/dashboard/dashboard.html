@@ -140,8 +140,19 @@
             {{end}}
         </div>
         <div style="display: flex; gap: 0.4rem;">
+            {{if .IsActive}}
             <button class="btn btn-sm btn-primary" onclick="copyURI(this)" data-uri="{{.VlessURI}}">Копировать</button>
             <button class="btn btn-sm btn-primary" onclick="showQR(this)" data-uri="{{.VlessURI}}">QR</button>
+            <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
+                <input type="hidden" name="action" value="deactivate">
+                <button type="submit" class="btn btn-sm" style="background: #475569; color: white;" title="Выключить профиль (можно включить позже)">Выкл</button>
+            </form>
+            {{else}}
+            <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
+                <input type="hidden" name="action" value="activate">
+                <button type="submit" class="btn btn-sm btn-primary" title="Включить профиль">Вкл</button>
+            </form>
+            {{end}}
             <form method="POST" action="/dashboard/profiles/{{.ID}}/delete" style="display:inline;">
                 <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль? Баланс не изменится — трафик общий на подписку.')">✕</button>
             </form>

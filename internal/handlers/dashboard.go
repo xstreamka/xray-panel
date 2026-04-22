@@ -318,7 +318,109 @@ func (h *DashboardHandler) SetProfileLimit(w http.ResponseWriter, r *http.Reques
 		collector.UpdateLimit(profile.UUID, limitBytes)
 	}
 
+	// Если профиль был отключён из-за превышения personal-лимита, и новый
+	// лимит больше уже накопленного трафика (или 0 = безлимит) — реактивируем.
+	// Коллектор сам проверит user-баланс и отключит снова, если тот исчерпан.
+	if !profile.IsActive {
+		totalTraffic := profile.TrafficUp + profile.TrafficDown
+		canActivate := limitBytes == 0 || totalTraffic < limitBytes
+		if canActivate {
+			h.reactivateProfile(r.Context(), profile, limitBytes)
+		}
+	}
+
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// ToggleProfile — POST /dashboard/profiles/{id}/toggle — юзер сам включает
+// или выключает свой профиль. Выключенный профиль остаётся в БД с is_active=false;
+// URI для него не принимается Xray (юзер удалён из inbound). Статистика
+// трафика сохраняется — после включения будет продолжаться с того же числа.
+//
+// Форма передаёт action=activate или action=deactivate.
+// При активации проверяется personal-лимит: если TrafficLimit>0 и уже превышен,
+// просим юзера сначала сменить лимит. User-баланс здесь не проверяется —
+// коллектор отсечёт профиль в ближайшем тике, если баланс 0.
+func (h *DashboardHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	profile, err := h.profiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		return
+	}
+
+	switch r.FormValue("action") {
+	case "activate":
+		if profile.IsActive {
+			http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+			return
+		}
+		if profile.TrafficLimit > 0 && profile.TrafficUp+profile.TrafficDown >= profile.TrafficLimit {
+			http.Error(w,
+				"Лимит устройства превышен. Увеличьте лимит или поставьте 0 (безлимит) и повторите.",
+				http.StatusBadRequest)
+			return
+		}
+		h.reactivateProfile(r.Context(), profile, profile.TrafficLimit)
+
+	case "deactivate":
+		if !profile.IsActive {
+			http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+			return
+		}
+		h.deactivateProfile(r.Context(), profile)
+
+	default:
+		http.Error(w, "Unknown action", http.StatusBadRequest)
+		return
+	}
+
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// reactivateProfile возвращает один профиль в работу: is_active=true в БД,
+// AddUser в Xray, обновление personal-лимита в кэше коллектора.
+// Не отвечает за проверку условий — это делает вызывающий код.
+func (h *DashboardHandler) reactivateProfile(ctx context.Context, p *models.VPNProfile, limitBytes int64) {
+	if err := h.profiles.SetActive(ctx, p.ID, true); err != nil {
+		log.Printf("Dashboard: reactivate SetActive profile=%d: %v", p.ID, err)
+		return
+	}
+	if client := h.xrayHolder.Get(); client != nil {
+		if err := client.AddUser(ctx, p.UUID, p.UUID); err != nil {
+			log.Printf("Dashboard: reactivate AddUser profile=%d: %v", p.ID, err)
+		}
+	}
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.RegisterProfile(p.UUID, p.UserID, limitBytes)
+	}
+	log.Printf("Dashboard: profile %s reactivated by user", p.UUID)
+}
+
+// deactivateProfile снимает is_active в БД, убивает активные соединения
+// через ss-K и удаляет UUID из Xray, чтобы никто не мог переподключиться.
+// Статистика трафика на профиле сохраняется.
+func (h *DashboardHandler) deactivateProfile(ctx context.Context, p *models.VPNProfile) {
+	if err := h.profiles.SetActive(ctx, p.ID, false); err != nil {
+		log.Printf("Dashboard: deactivate SetActive profile=%d: %v", p.ID, err)
+		return
+	}
+	if client := h.xrayHolder.Get(); client != nil {
+		if fw := h.xrayHolder.GetFirewall(); fw != nil {
+			fw.BlockUser(ctx, client, p.UUID)
+		}
+		if err := client.RemoveUser(ctx, p.UUID); err != nil {
+			log.Printf("Dashboard: deactivate RemoveUser profile=%d: %v", p.ID, err)
+		}
+	}
+	log.Printf("Dashboard: profile %s deactivated by user", p.UUID)
 }
 
 func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request) {
