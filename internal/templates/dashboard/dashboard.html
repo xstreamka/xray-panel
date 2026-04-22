@@ -152,13 +152,22 @@
     <div class="uri-box">{{.VlessURI}}</div>
     {{end}}
 
-    <div class="stats">
+    <div class="stats" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
         <span class="stat" data-stat="up">↑ {{formatBytes .TrafficUp}}</span>
         <span class="stat" data-stat="down">↓ {{formatBytes .TrafficDown}}</span>
         <span class="stat" data-stat="total">Σ {{formatBytes .TrafficTotal}}</span>
         {{if .ExpiresAt}}
             <span class="stat">До: {{.ExpiresAt.Format "02.01.2006"}}</span>
         {{end}}
+        <form method="POST" action="/dashboard/profiles/{{.ID}}/limit"
+              style="display: flex; gap: 0.3rem; align-items: center; margin-left: auto;"
+              title="Личный лимит устройства (0 = безлимит)">
+            <label style="color: #94a3b8; font-size: 0.85rem; margin: 0;">Лимит:</label>
+            <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
+                style="width: 80px; padding: 0.25rem 0.4rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
+            <span style="color: #94a3b8; font-size: 0.8rem;">ГБ</span>
+            <button type="submit" class="btn btn-sm btn-primary">OK</button>
+        </form>
     </div>
 
     {{if gt .TrafficLimit 0}}

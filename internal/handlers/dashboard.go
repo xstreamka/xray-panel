@@ -281,6 +281,46 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
+// SetProfileLimit — POST /dashboard/profiles/{id}/limit — юзер сам задаёт
+// или меняет personal-лимит своего профиля (0 = безлимит, трафик списывается
+// только из общего подписочного пула).
+func (h *DashboardHandler) SetProfileLimit(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	limitGB, err := strconv.ParseFloat(strings.TrimSpace(r.FormValue("limit_gb")), 64)
+	if err != nil || limitGB < 0 {
+		http.Error(w, "Некорректное значение лимита", http.StatusBadRequest)
+		return
+	}
+	limitBytes := int64(limitGB * 1024 * 1024 * 1024)
+
+	// Проверка ownership: юзер может менять только свои профили.
+	profile, err := h.profiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		return
+	}
+
+	if err := h.profiles.SetLimit(r.Context(), id, limitBytes); err != nil {
+		log.Printf("Dashboard: set limit error profile=%d user=%d: %v", id, user.ID, err)
+		http.Error(w, "Ошибка сохранения", http.StatusInternalServerError)
+		return
+	}
+
+	if collector := h.xrayHolder.GetCollector(); collector != nil {
+		collector.UpdateLimit(profile.UUID, limitBytes)
+	}
+
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
 func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 	idStr := chi.URLParam(r, "id")
