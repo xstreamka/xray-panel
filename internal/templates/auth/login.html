@@ -1,9 +1,10 @@
 {{template "base" .}}
 
-{{define "title"}}Вход — VPN Panel{{end}}
+{{define "title"}}Вход — Панель для клиентов{{end}}
 
 {{define "content"}}
 <div style="max-width: 400px; margin: 4rem auto;">
+    <h1 class="auth-brand">Панель для клиентов</h1>
     <div class="card">
         <h2 style="margin-bottom: 1.5rem; text-align: center;">Вход</h2>
         {{if .Error}}<div class="error">{{.Error}}</div>{{end}}

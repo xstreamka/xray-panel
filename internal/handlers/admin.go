@@ -599,13 +599,25 @@ type adminProfileStatsJSON struct {
 }
 
 type adminUserStatsJSON struct {
-	UserID      int                     `json:"user_id"`
-	OnlineCount int                     `json:"online_count"`
-	Total       string                  `json:"total_traffic_fmt"`
-	BalanceFmt  string                  `json:"balance_fmt"`
-	BaseFmt     string                  `json:"base_fmt"`  // "X / Y" для карточки юзера
-	ExtraFmt    string                  `json:"extra_fmt"` // "X" для карточки юзера
-	Profiles    []adminProfileStatsJSON `json:"profiles"`
+	UserID      int    `json:"user_id"`
+	OnlineCount int    `json:"online_count"`
+	Total       string `json:"total_traffic_fmt"`
+	BalanceFmt  string `json:"balance_fmt"`
+	BaseFmt     string `json:"base_fmt"`  // "X / Y" для карточки юзера
+	ExtraFmt    string `json:"extra_fmt"` // "X" для карточки юзера
+	// Поля для прогресс-баров на /admin/users/{id} ("Баланс трафика").
+	// В списке /admin не используются — JS просто не находит элементов.
+	BaseUsed        int64                   `json:"base_used"`
+	BaseLimit       int64                   `json:"base_limit"`
+	BasePercent     int                     `json:"base_percent"`
+	BaseUsedFmt     string                  `json:"base_used_fmt"`
+	BaseLimitFmt    string                  `json:"base_limit_fmt"`
+	ExtraUsed       int64                   `json:"extra_used"`
+	ExtraGranted    int64                   `json:"extra_granted"`
+	ExtraPercent    int                     `json:"extra_percent"`
+	ExtraUsedFmt    string                  `json:"extra_used_fmt"`
+	ExtraGrantedFmt string                  `json:"extra_granted_fmt"`
+	Profiles        []adminProfileStatsJSON `json:"profiles"`
 }
 
 func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
@@ -639,11 +651,41 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]adminUserStatsJSON, 0, len(users))
 	for _, u := range users {
+		basePct := 0
+		if u.BaseTrafficLimit > 0 {
+			used := u.BaseTrafficUsed
+			if used > u.BaseTrafficLimit {
+				used = u.BaseTrafficLimit
+			}
+			basePct = int(float64(used) / float64(u.BaseTrafficLimit) * 100)
+		}
+		extraUsed := u.ExtraTrafficGranted - u.ExtraTrafficBalance
+		if extraUsed < 0 {
+			extraUsed = 0
+		}
+		extraPct := 0
+		if u.ExtraTrafficGranted > 0 {
+			used := extraUsed
+			if used > u.ExtraTrafficGranted {
+				used = u.ExtraTrafficGranted
+			}
+			extraPct = int(float64(used) / float64(u.ExtraTrafficGranted) * 100)
+		}
 		uv := adminUserStatsJSON{
-			UserID:     u.ID,
-			BalanceFmt: formatBytesGo(u.TotalAvailable()),
-			BaseFmt:    formatBytesGo(u.BaseTrafficUsed) + " / " + formatBytesGo(u.BaseTrafficLimit),
-			ExtraFmt:   formatBytesGo(u.ExtraTrafficBalance),
+			UserID:          u.ID,
+			BalanceFmt:      formatBytesGo(u.TotalAvailable()),
+			BaseFmt:         formatBytesGo(u.BaseTrafficUsed) + " / " + formatBytesGo(u.BaseTrafficLimit),
+			ExtraFmt:        formatBytesGo(u.ExtraTrafficBalance),
+			BaseUsed:        u.BaseTrafficUsed,
+			BaseLimit:       u.BaseTrafficLimit,
+			BasePercent:     basePct,
+			BaseUsedFmt:     formatBytesGo(u.BaseTrafficUsed),
+			BaseLimitFmt:    formatBytesGo(u.BaseTrafficLimit),
+			ExtraUsed:       extraUsed,
+			ExtraGranted:    u.ExtraTrafficGranted,
+			ExtraPercent:    extraPct,
+			ExtraUsedFmt:    formatBytesGo(extraUsed),
+			ExtraGrantedFmt: formatBytesGo(u.ExtraTrafficGranted),
 		}
 		var totalTraffic int64
 		for _, p := range profilesByUser[u.ID] {

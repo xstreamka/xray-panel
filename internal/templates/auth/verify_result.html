@@ -1,9 +1,10 @@
 {{template "base" .}}
 
-{{define "title"}}Подтверждение email — VPN Panel{{end}}
+{{define "title"}}Подтверждение email — Панель для клиентов{{end}}
 
 {{define "content"}}
 <div style="max-width: 450px; margin: 4rem auto;">
+    <h1 class="auth-brand">Панель для клиентов</h1>
     <div class="card" style="text-align: center;">
         {{if .Success}}
             <h2 style="margin-bottom: 1rem;">✅ Email подтверждён!</h2>

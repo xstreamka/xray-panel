@@ -10,6 +10,7 @@ nav .brand { color: #38bdf8; font-weight: bold; font-size: 1.2rem; }
 nav .nav-user { color: #e2e8f0; padding: 0.35rem 0.7rem; border-left: 1px solid #334155; margin-left: 0.4rem; font-size: 0.9rem; }
 nav .nav-logout { color: #64748b; }
 .card { background: #1e293b; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
+.auth-brand { color: #38bdf8; font-size: 1.6rem; font-weight: bold; text-align: center; margin-bottom: 1.2rem; letter-spacing: 0.02em; }
 .btn { display: inline-block; padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; text-decoration: none; }
 .btn-primary { background: #3b82f6; color: white; }
 .btn-primary:hover { background: #2563eb; }

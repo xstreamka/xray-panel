@@ -36,6 +36,42 @@ function refreshStats() {
                 const userExtra = card.querySelector('[data-stat="user-extra"]');
                 if (userExtra && u.extra_fmt) userExtra.textContent = u.extra_fmt;
 
+                // Прогресс базового трафика подписки
+                const baseRow = card.querySelector('[data-stat="user-base-row"]');
+                if (baseRow) baseRow.style.display = u.base_limit > 0 ? '' : 'none';
+                if (u.base_limit > 0) {
+                    const baseUsed = card.querySelector('[data-stat="user-base-used"]');
+                    const baseLimit = card.querySelector('[data-stat="user-base-limit"]');
+                    const basePct = card.querySelector('[data-stat="user-base-pct"]');
+                    const baseBar = card.querySelector('[data-stat="user-base-bar"]');
+                    if (baseUsed) baseUsed.textContent = u.base_used_fmt;
+                    if (baseLimit) baseLimit.textContent = u.base_limit_fmt;
+                    if (basePct) basePct.textContent = u.base_percent;
+                    if (baseBar) {
+                        baseBar.style.width = u.base_percent + '%';
+                        baseBar.style.background = u.base_percent >= 90 ? '#ef4444'
+                            : u.base_percent >= 70 ? '#f59e0b' : '#22c55e';
+                    }
+                }
+
+                // Прогресс докупленного трафика
+                const extraRow = card.querySelector('[data-stat="user-extra-row"]');
+                if (extraRow) extraRow.style.display = u.extra_granted > 0 ? '' : 'none';
+                if (u.extra_granted > 0) {
+                    const extraUsed = card.querySelector('[data-stat="user-extra-used"]');
+                    const extraGranted = card.querySelector('[data-stat="user-extra-granted"]');
+                    const extraPct = card.querySelector('[data-stat="user-extra-pct"]');
+                    const extraBar = card.querySelector('[data-stat="user-extra-bar"]');
+                    if (extraUsed) extraUsed.textContent = u.extra_used_fmt;
+                    if (extraGranted) extraGranted.textContent = u.extra_granted_fmt;
+                    if (extraPct) extraPct.textContent = u.extra_percent;
+                    if (extraBar) {
+                        extraBar.style.width = u.extra_percent + '%';
+                        extraBar.style.background = u.extra_percent >= 90 ? '#ef4444'
+                            : u.extra_percent >= 70 ? '#f59e0b' : '#fcd34d';
+                    }
+                }
+
                 (u.profiles || []).forEach(p => {
                     const row = card.querySelector(`[data-profile-id="${p.id}"]`);
                     if (!row) return;

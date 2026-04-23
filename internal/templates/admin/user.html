@@ -187,29 +187,25 @@
         </div>
     </div>
 
-    {{if gt .BaseTrafficLimit 0}}
-    <div style="margin-bottom: 1rem;">
+    <div data-stat="user-base-row" style="margin-bottom: 1rem; {{if le .BaseTrafficLimit 0}}display: none;{{end}}">
         <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
             <span>Базовый трафик подписки</span>
-            <span><strong style="color: #e2e8f0;">{{formatBytes .BaseTrafficUsed}}</strong> / {{formatBytes .BaseTrafficLimit}} · {{.BasePercent}}%</span>
+            <span><strong style="color: #e2e8f0;" data-stat="user-base-used">{{formatBytes .BaseTrafficUsed}}</strong> / <span data-stat="user-base-limit">{{formatBytes .BaseTrafficLimit}}</span> · <span data-stat="user-base-pct">{{.BasePercent}}</span>%</span>
         </div>
         <div style="background: #334155; border-radius: 4px; height: 8px; overflow: hidden;">
-            <div style="background: {{if ge .BasePercent 90}}#ef4444{{else if ge .BasePercent 70}}#f59e0b{{else}}#22c55e{{end}}; width: {{.BasePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+            <div data-stat="user-base-bar" style="background: {{if ge .BasePercent 90}}#ef4444{{else if ge .BasePercent 70}}#f59e0b{{else}}#22c55e{{end}}; width: {{.BasePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
         </div>
     </div>
-    {{end}}
 
-    {{if gt .ExtraTrafficGranted 0}}
-    <div style="margin-bottom: 1rem;">
+    <div data-stat="user-extra-row" style="margin-bottom: 1rem; {{if le .ExtraTrafficGranted 0}}display: none;{{end}}">
         <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
             <span>Докупленный трафик</span>
-            <span><strong style="color: #e2e8f0;">{{formatBytes .ExtraUsed}}</strong> / {{formatBytes .ExtraTrafficGranted}} · {{.ExtraPercent}}%</span>
+            <span><strong style="color: #e2e8f0;" data-stat="user-extra-used">{{formatBytes .ExtraUsed}}</strong> / <span data-stat="user-extra-granted">{{formatBytes .ExtraTrafficGranted}}</span> · <span data-stat="user-extra-pct">{{.ExtraPercent}}</span>%</span>
         </div>
         <div style="background: #334155; border-radius: 4px; height: 8px; overflow: hidden;">
-            <div style="background: {{if ge .ExtraPercent 90}}#ef4444{{else if ge .ExtraPercent 70}}#f59e0b{{else}}#fcd34d{{end}}; width: {{.ExtraPercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+            <div data-stat="user-extra-bar" style="background: {{if ge .ExtraPercent 90}}#ef4444{{else if ge .ExtraPercent 70}}#f59e0b{{else}}#fcd34d{{end}}; width: {{.ExtraPercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
         </div>
     </div>
-    {{end}}
 
     <form method="POST" action="/admin/users/{{.ID}}/extra"
           title="Установить extra-баланс (ГБ) — и плюс, и минус">
