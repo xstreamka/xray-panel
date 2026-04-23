@@ -84,8 +84,12 @@
             <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.2rem;">Профили</div>
             <div style="font-size: 1.2rem;"><strong>{{.ActiveCount}}</strong> <span style="color: #94a3b8; font-size: 0.9rem;">/ {{len .Profiles}}</span></div>
         </div>
-        <div style="background: #0f172a; padding: 0.8rem 1rem; border-radius: 6px;">
-            <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.2rem;">Суммарный трафик</div>
+        <div style="background: #0f172a; padding: 0.8rem 1rem; border-radius: 6px;"
+             title="Сумма счётчиков по активным VPN-профилям. Обнуляется кнопкой «Сброс» у профиля и исчезает при удалении профиля — для контроля реальных списаний с баланса смотрите блок «Баланс трафика».">
+            <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.2rem;">
+                Σ по профилям
+                <span style="color: #64748b;" title="Сумма traffic_up + traffic_down по профилям юзера. Сбрасывается кнопкой «Сброс» у профиля.">ⓘ</span>
+            </div>
             <div style="font-size: 1.2rem;" data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</div>
         </div>
         <div style="background: #0f172a; padding: 0.8rem 1rem; border-radius: 6px;">
@@ -183,6 +187,30 @@
         </div>
     </div>
 
+    {{if gt .BaseTrafficLimit 0}}
+    <div style="margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
+            <span>Базовый трафик подписки</span>
+            <span><strong style="color: #e2e8f0;">{{formatBytes .BaseTrafficUsed}}</strong> / {{formatBytes .BaseTrafficLimit}} · {{.BasePercent}}%</span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 8px; overflow: hidden;">
+            <div style="background: {{if ge .BasePercent 90}}#ef4444{{else if ge .BasePercent 70}}#f59e0b{{else}}#22c55e{{end}}; width: {{.BasePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+        </div>
+    </div>
+    {{end}}
+
+    {{if gt .ExtraTrafficGranted 0}}
+    <div style="margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
+            <span>Докупленный трафик</span>
+            <span><strong style="color: #e2e8f0;">{{formatBytes .ExtraUsed}}</strong> / {{formatBytes .ExtraTrafficGranted}} · {{.ExtraPercent}}%</span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 8px; overflow: hidden;">
+            <div style="background: {{if ge .ExtraPercent 90}}#ef4444{{else if ge .ExtraPercent 70}}#f59e0b{{else}}#fcd34d{{end}}; width: {{.ExtraPercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+        </div>
+    </div>
+    {{end}}
+
     <form method="POST" action="/admin/users/{{.ID}}/extra"
           title="Установить extra-баланс (ГБ) — и плюс, и минус">
         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
@@ -232,7 +260,17 @@
                 {{end}}
             </td>
             <td>
-                <span class="stat" data-stat="profile-traffic">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
+                <div style="display: flex; flex-direction: column; gap: 0.3rem; min-width: 140px;">
+                    <span class="stat" data-stat="profile-traffic">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
+                    {{if gt .TrafficLimit 0}}
+                    <div style="font-size: 0.75rem; color: #94a3b8;">
+                        Σ {{formatBytes .TrafficTotal}} / {{formatBytes .TrafficLimit}} · {{.UsagePercent}}%
+                    </div>
+                    <div style="background: #334155; border-radius: 4px; height: 5px; overflow: hidden;">
+                        <div style="background: {{.ProgressColor}}; width: {{.UsagePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+                    </div>
+                    {{end}}
+                </div>
             </td>
             <td>
                 <form method="POST" action="/admin/profiles/{{.ID}}/limit" style="display: flex; gap: 0.3rem; align-items: center;">

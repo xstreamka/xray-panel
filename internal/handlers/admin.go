@@ -45,15 +45,21 @@ func NewAdminHandler(
 }
 
 // adminProfileView — строчка профиля с живыми данными (онлайн + IP).
+// UsagePercent/ProgressColor заполняются только если TrafficLimit > 0
+// (личный лимит профиля). Без лимита прогресс-бар не рисуется — см. шаблон.
 type adminProfileView struct {
 	models.VPNProfile
-	IsOnline  bool
-	OnlineIPs []string
+	IsOnline      bool
+	OnlineIPs     []string
+	TrafficTotal  int64 // up + down, чтобы не считать в шаблоне
+	UsagePercent  int
+	ProgressColor string
 }
 
 // adminUserView — пользователь + агрегаты + профили. Один общий тип для
 // списка /admin и детальной карточки /admin/users/{id}, чтобы шаблоны
-// обращались к одним и тем же полям.
+// обращались к одним и тем же полям. Поля Base/ExtraPercent и ExtraUsed —
+// для прогресс-баров на карточке (в списке не используются).
 type adminUserView struct {
 	models.User
 	Profiles     []adminProfileView
@@ -62,6 +68,23 @@ type adminUserView struct {
 	OnlineCount  int
 	TariffLabel  string
 	DaysLeft     int
+	BasePercent  int
+	ExtraUsed    int64
+	ExtraPercent int
+}
+
+// progressColor — цветовая шкала для прогресс-бара. Совпадает с dashboard:
+// < 70% зелёный, 70–90% оранжевый, ≥ 90% красный. Для extra — желтый
+// базовый цвет (см. шаблон, передаётся отдельно).
+func progressColor(pct int) string {
+	switch {
+	case pct >= 90:
+		return "#ef4444"
+	case pct >= 70:
+		return "#f59e0b"
+	default:
+		return "#22c55e"
+	}
 }
 
 // adminRedirectBack — куда слать юзера после POST-действия.
@@ -159,6 +182,22 @@ func (h *AdminHandler) enrichAllProfiles(ctx context.Context, profiles []models.
 func (h *AdminHandler) buildUserView(
 	ctx context.Context, u models.User, profs []adminProfileView, tariffNames map[int]string,
 ) adminUserView {
+	// Для каждого профиля с личным лимитом считаем процент/цвет, чтобы
+	// шаблон мог нарисовать прогресс-бар в таблице.
+	for i := range profs {
+		profs[i].TrafficTotal = profs[i].TrafficUp + profs[i].TrafficDown
+		tl := profs[i].TrafficLimit
+		if tl <= 0 {
+			continue
+		}
+		pct := int(float64(profs[i].TrafficTotal) / float64(tl) * 100)
+		if pct > 100 {
+			pct = 100
+		}
+		profs[i].UsagePercent = pct
+		profs[i].ProgressColor = progressColor(pct)
+	}
+
 	v := adminUserView{User: u, Profiles: profs}
 	for _, p := range v.Profiles {
 		v.TotalTraffic += p.TrafficUp + p.TrafficDown
@@ -186,6 +225,30 @@ func (h *AdminHandler) buildUserView(
 		if d > 0 {
 			v.DaysLeft = int(d) + 1
 		}
+	}
+
+	// Base: процент использования подписочного лимита. Если лимита нет
+	// (подписки нет / сброшен), остаётся 0 — шаблон не рисует бар.
+	if u.BaseTrafficLimit > 0 {
+		used := u.BaseTrafficUsed
+		if used > u.BaseTrafficLimit {
+			used = u.BaseTrafficLimit
+		}
+		v.BasePercent = int(float64(used) / float64(u.BaseTrafficLimit) * 100)
+	}
+	// Extra: процент потраченного от выданного в текущем цикле. granted
+	// фиксируется при каждом пополнении, balance уменьшается при списании —
+	// их разность и есть «потрачено из extra».
+	v.ExtraUsed = u.ExtraTrafficGranted - u.ExtraTrafficBalance
+	if v.ExtraUsed < 0 {
+		v.ExtraUsed = 0
+	}
+	if u.ExtraTrafficGranted > 0 {
+		used := v.ExtraUsed
+		if used > u.ExtraTrafficGranted {
+			used = u.ExtraTrafficGranted
+		}
+		v.ExtraPercent = int(float64(used) / float64(u.ExtraTrafficGranted) * 100)
 	}
 	return v
 }
