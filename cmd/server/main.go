@@ -97,7 +97,10 @@ func main() {
 	}
 
 	authMW := middleware.NewAuthMiddleware(userStore, cfg.SecretKey)
-	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL)
+	// Лимит на запросы восстановления пароля: 3 в час с одного IP.
+	// Значение продублировано константой handlers.ResetLimitMax для UI-сноски.
+	resetLimiter := middleware.NewRateLimiter(handlers.ResetLimitMax, time.Hour)
+	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL, resetLimiter)
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, xrayHolder, renderer)
 	payHandler := handlers.NewPayHandler(
@@ -128,6 +131,12 @@ func main() {
 	r.With(loginLimiter.Middleware).Post("/register", authHandler.Register)
 	r.Get("/verify", authHandler.VerifyEmail) // GET /verify?token=xxx
 	r.Get("/logout", authHandler.Logout)
+	// Восстановление пароля. Rate-limit (3/час) выполняется внутри хендлера,
+	// чтобы рендерить дружелюбную страницу вместо голого 429.
+	r.Get("/forgot", authHandler.ForgotPasswordPage)
+	r.Post("/forgot", authHandler.ForgotPassword)
+	r.Get("/reset", authHandler.ResetPasswordPage) // GET /reset?token=xxx
+	r.Post("/reset", authHandler.ResetPassword)
 	// Webhook от pay-service (защищён HMAC-подписью, не сессией)
 	r.Post("/api/payments/webhook", payHandler.Webhook)
 

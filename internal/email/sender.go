@@ -48,6 +48,28 @@ VPN Panel`, verifyURL)
 	return s.send(to, subject, body)
 }
 
+// SendPasswordReset — письмо со ссылкой для восстановления пароля.
+// Ссылка живёт 1 час (см. UserStore.CreateResetToken).
+func (s *Sender) SendPasswordReset(to, token, baseURL string) error {
+	resetURL := fmt.Sprintf("%s/reset?token=%s", strings.TrimRight(baseURL, "/"), token)
+
+	subject := "Восстановление пароля — VPN Panel"
+	body := fmt.Sprintf(`Привет!
+
+Кто-то запросил восстановление пароля для вашего аккаунта.
+
+Чтобы задать новый пароль, перейдите по ссылке (действует 1 час):
+
+%s
+
+Если запрос отправляли не вы — проигнорируйте это письмо, пароль не изменится.
+
+—
+VPN Panel`, resetURL)
+
+	return s.send(to, subject, body)
+}
+
 // SendTopupNotification — уведомление о зачислении баланса после оплаты.
 func (s *Sender) SendTopupNotification(to, username string, trafficGB, amountRub float64, invID int, baseURL string) error {
 	dashURL := strings.TrimRight(baseURL, "/") + "/dashboard"

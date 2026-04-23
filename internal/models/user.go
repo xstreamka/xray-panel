@@ -163,6 +163,60 @@ func (s *UserStore) VerifyEmail(ctx context.Context, token string) (*User, error
 	return u, nil
 }
 
+// CreateResetToken генерирует одноразовый токен восстановления для юзера,
+// найденного по логину ИЛИ email (case-insensitive по email). Если такого нет —
+// возвращает (nil, "", "", nil): вызывающий код должен в любом случае отвечать
+// одинаково, чтобы по ответу нельзя было выяснить наличие аккаунта.
+// Токен живёт 1 час.
+func (s *UserStore) CreateResetToken(ctx context.Context, loginOrEmail string) (userID *int, email, token string, err error) {
+	tok, err := generateToken()
+	if err != nil {
+		return nil, "", "", fmt.Errorf("generate token: %w", err)
+	}
+	expires := time.Now().Add(1 * time.Hour)
+
+	var id int
+	var em string
+	row := s.pool.QueryRow(ctx,
+		`UPDATE users
+		 SET reset_token = $1, reset_expires = $2, updated_at = NOW()
+		 WHERE (username = $3 OR LOWER(email) = LOWER($3))
+		   AND is_active = TRUE
+		 RETURNING id, email`,
+		tok, expires, loginOrEmail,
+	)
+	if scanErr := row.Scan(&id, &em); scanErr != nil {
+		// Не считаем «нет такого юзера» ошибкой — это нормальный путь
+		return nil, "", "", nil
+	}
+	return &id, em, tok, nil
+}
+
+// ResetPassword меняет пароль по валидному токену. Атомарно сбрасывает токен,
+// чтобы повторное использование было невозможно. Возвращает юзера для логина
+// сразу после сброса.
+func (s *UserStore) ResetPassword(ctx context.Context, token, newPassword string) (*User, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
+	u := &User{}
+	row := s.pool.QueryRow(ctx,
+		`UPDATE users
+		 SET password_hash = $1,
+		     reset_token = NULL,
+		     reset_expires = NULL,
+		     updated_at = NOW()
+		 WHERE reset_token = $2 AND reset_expires > NOW()
+		 RETURNING `+userCols,
+		string(hash), token,
+	)
+	if err := scanUser(row, u); err != nil {
+		return nil, fmt.Errorf("invalid or expired token")
+	}
+	return u, nil
+}
+
 func (s *UserStore) RegenerateVerifyToken(ctx context.Context, userID int) (string, string, error) {
 	token, err := generateToken()
 	if err != nil {
@@ -468,4 +522,3 @@ func (s *UserStore) MarkReminderSent(ctx context.Context, userID int, days int) 
 	)
 	return err
 }
-

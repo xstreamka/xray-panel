@@ -60,6 +60,11 @@ var migrations = []string{
 
 	`CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token) WHERE verify_token IS NOT NULL`,
 
+	// Восстановление пароля: одноразовый токен + срок жизни
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(64)`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires TIMESTAMPTZ`,
+	`CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token) WHERE reset_token IS NOT NULL`,
+
 	// Таблица тарифов — управляется через /admin/tariffs
 	`CREATE TABLE IF NOT EXISTS tariffs (
 		id          SERIAL PRIMARY KEY,
