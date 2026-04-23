@@ -11,12 +11,13 @@ import (
 )
 
 type StatsCollector struct {
-	client   *Client
-	profiles *models.VPNProfileStore
-	users    *models.UserStore
-	firewall *Firewall
-	mailer   *email.Sender // nil если SMTP не настроен — уведомления пропускаем
-	baseURL  string
+	client      *Client
+	profiles    *models.VPNProfileStore
+	users       *models.UserStore
+	trafficLogs *models.TrafficLogStore
+	firewall    *Firewall
+	mailer      *email.Sender // nil если SMTP не настроен — уведомления пропускаем
+	baseURL     string
 
 	// pending хранит трафик, который не удалось записать в БД
 	pending map[string][2]int64
@@ -37,6 +38,17 @@ type StatsCollector struct {
 	uuidToUser   map[string]int
 	uuidToUserMu sync.RWMutex
 
+	// Мэппинг UUID → profile_id. Нужен, чтобы при flush в traffic_logs писать
+	// по profile_id, а не делать лишний SELECT по UUID на каждый тик.
+	uuidToProfile   map[string]int
+	uuidToProfileMu sync.RWMutex
+
+	// trafficBuffer копит дельты для записи в traffic_logs. Ключ — profile_id,
+	// значение — [bytes_up, bytes_down] с момента последнего flush. Сбрасывается
+	// в БД раз в минуту одним batch-UPSERT'ом (см. flushTrafficLogs).
+	trafficBuffer   map[int][2]int64
+	trafficBufferMu sync.Mutex
+
 	// disabledUsers — юзеры, чей баланс уже исчерпан в этом цикле enforcement.
 	// Чтобы не спамить DeductTraffic и DisconnectUserAll в каждом тике
 	// до ближайшей ресинхронизации.
@@ -52,10 +64,16 @@ type StatsCollector struct {
 	lastFullEnforce time.Time
 }
 
+// trafficLogRetention — сколько храним 5-минутные бакеты. Дневной retention-job
+// в Run удаляет записи старше этого срока. 90 дней хватает на графики
+// 24h/7d/30d/90d без второго слоя агрегации.
+const trafficLogRetention = 90 * 24 * time.Hour
+
 func NewStatsCollector(
 	client *Client,
 	profiles *models.VPNProfileStore,
 	users *models.UserStore,
+	trafficLogs *models.TrafficLogStore,
 	firewall *Firewall,
 	mailer *email.Sender,
 	baseURL string,
@@ -64,6 +82,7 @@ func NewStatsCollector(
 		client:        client,
 		profiles:      profiles,
 		users:         users,
+		trafficLogs:   trafficLogs,
 		firewall:      firewall,
 		mailer:        mailer,
 		baseURL:       baseURL,
@@ -71,6 +90,8 @@ func NewStatsCollector(
 		cumulative:    make(map[string]int64),
 		limits:        make(map[string]int64),
 		uuidToUser:    make(map[string]int),
+		uuidToProfile: make(map[string]int),
+		trafficBuffer: make(map[int][2]int64),
 		disabledUsers: make(map[int]bool),
 	}
 }
@@ -173,14 +194,18 @@ func (s *StatsCollector) InitCumulative(ctx context.Context) {
 	s.cumulativeMu.Lock()
 	s.limitsMu.Lock()
 	s.uuidToUserMu.Lock()
+	s.uuidToProfileMu.Lock()
 
 	clear(s.uuidToUser)
+	clear(s.uuidToProfile)
 	for _, p := range profiles {
 		s.cumulative[p.UUID] = p.TrafficUp + p.TrafficDown
 		s.limits[p.UUID] = p.TrafficLimit
 		s.uuidToUser[p.UUID] = p.UserID
+		s.uuidToProfile[p.UUID] = p.ID
 	}
 
+	s.uuidToProfileMu.Unlock()
 	s.uuidToUserMu.Unlock()
 	s.limitsMu.Unlock()
 	s.cumulativeMu.Unlock()
@@ -201,12 +226,17 @@ func (s *StatsCollector) UpdateLimit(uuid string, limitBytes int64) {
 }
 
 // RegisterProfile регистрирует только что созданный профиль в кэшах коллектора:
-// mapping UUID → user_id и personal-лимит. Без этого списание с user-баланса
-// для свежего профиля не работало бы до ближайшей ресинхронизации InitCumulative.
-func (s *StatsCollector) RegisterProfile(uuid string, userID int, limitBytes int64) {
+// mapping UUID → user_id, UUID → profile_id и personal-лимит. Без этого списание
+// с user-баланса для свежего профиля не работало бы до ближайшей ресинхронизации
+// InitCumulative, а traffic_logs не знал бы profile_id для UPSERT'а.
+func (s *StatsCollector) RegisterProfile(uuid string, profileID, userID int, limitBytes int64) {
 	s.uuidToUserMu.Lock()
 	s.uuidToUser[uuid] = userID
 	s.uuidToUserMu.Unlock()
+
+	s.uuidToProfileMu.Lock()
+	s.uuidToProfile[uuid] = profileID
+	s.uuidToProfileMu.Unlock()
 
 	s.limitsMu.Lock()
 	s.limits[uuid] = limitBytes
@@ -228,6 +258,10 @@ func (s *StatsCollector) UnregisterProfile(uuid string) {
 	delete(s.uuidToUser, uuid)
 	s.uuidToUserMu.Unlock()
 
+	s.uuidToProfileMu.Lock()
+	delete(s.uuidToProfile, uuid)
+	s.uuidToProfileMu.Unlock()
+
 	s.limitsMu.Lock()
 	delete(s.limits, uuid)
 	s.limitsMu.Unlock()
@@ -247,24 +281,76 @@ func (s *StatsCollector) ResetCumulative(uuid string) {
 func (s *StatsCollector) Run(ctx context.Context) {
 	log.Println("Stats collector started")
 
-	// Единый тикер 5 секунд: порядок важен — collectAndEnforce пишет
-	// s.lastTraffic, из которого updateOnlineStatus определяет активных юзеров.
-	// Секундный тик был избыточен: enforcement'у хватает 5 сек (overspend при
-	// 100 Мбит/с ~60 МБ — шум), UI-поллинг фронтенда тоже 3–10 сек, а ценой
-	// была 1 gRPC + N DB-writes каждую секунду. Страховка enforceAll раз в
-	// минуту живёт внутри collectAndEnforce.
+	// Главный тикер 5 секунд: collectAndEnforce пишет s.lastTraffic, из него
+	// updateOnlineStatus определяет активных юзеров — порядок важен. Страховка
+	// enforceAll раз в минуту сидит внутри collectAndEnforce.
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+
+	// Flush буфера traffic_logs в БД. Раз в минуту, чтобы не долбить UPSERT
+	// каждый 5-секундный тик. При падении теряем до 60 сек дельт — терпимо.
+	flushTicker := time.NewTicker(1 * time.Minute)
+	defer flushTicker.Stop()
+
+	// Retention: удаление бакетов старше trafficLogRetention. Раз в сутки.
+	retentionTicker := time.NewTicker(24 * time.Hour)
+	defer retentionTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Println("Stats collector stopping, final flush…")
+			// ctx уже отменён — используем fresh context, чтобы успеть записать
+			// накопленные дельты перед выходом.
+			flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			s.flushTrafficLogs(flushCtx)
+			cancel()
 			log.Println("Stats collector stopped")
 			return
 		case <-ticker.C:
 			s.collectAndEnforce(ctx)
 			s.updateOnlineStatus(ctx)
+		case <-flushTicker.C:
+			s.flushTrafficLogs(ctx)
+		case <-retentionTicker.C:
+			s.cleanupTrafficLogs(ctx)
 		}
+	}
+}
+
+// flushTrafficLogs сбрасывает накопленный буфер в traffic_logs одним
+// batch-UPSERT'ом. Бакет выравнивается на 5-минутную границу, несколько
+// flush'ов внутри одного бакета суммируются через ON CONFLICT. При ошибке
+// буфер сбрасываем всё равно — retry смысла не имеет, данные для графиков,
+// не для биллинга; следующий тик продолжит копить с нуля.
+func (s *StatsCollector) flushTrafficLogs(ctx context.Context) {
+	s.trafficBufferMu.Lock()
+	if len(s.trafficBuffer) == 0 {
+		s.trafficBufferMu.Unlock()
+		return
+	}
+	batch := s.trafficBuffer
+	s.trafficBuffer = make(map[int][2]int64)
+	s.trafficBufferMu.Unlock()
+
+	bucket := models.BucketTime(time.Now())
+	if err := s.trafficLogs.UpsertBatch(ctx, bucket, batch); err != nil {
+		log.Printf("Stats: traffic_logs flush error (dropping %d rows): %v", len(batch), err)
+		return
+	}
+}
+
+// cleanupTrafficLogs удаляет бакеты старше trafficLogRetention. Вызывается
+// раз в сутки; нагрузка на БД разовая, индекс по logged_at покрывает запрос.
+func (s *StatsCollector) cleanupTrafficLogs(ctx context.Context) {
+	cutoff := time.Now().Add(-trafficLogRetention)
+	n, err := s.trafficLogs.DeleteOlderThan(ctx, cutoff)
+	if err != nil {
+		log.Printf("Stats: traffic_logs cleanup error: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("Stats: traffic_logs cleanup deleted %d rows older than %s", n, cutoff.Format(time.RFC3339))
 	}
 }
 
@@ -332,6 +418,21 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 			continue
 		}
 		updated++
+
+		// 5. Копим дельту в буфер для traffic_logs. Сбрасывается раз в минуту
+		// (flushTrafficLogs) одним batch-UPSERT'ом в 5-минутный бакет —
+		// посекундный INSERT сюда был бы убийством БД.
+		s.uuidToProfileMu.RLock()
+		pid, ok := s.uuidToProfile[uuid]
+		s.uuidToProfileMu.RUnlock()
+		if ok {
+			s.trafficBufferMu.Lock()
+			entry := s.trafficBuffer[pid]
+			entry[0] += up
+			entry[1] += down
+			s.trafficBuffer[pid] = entry
+			s.trafficBufferMu.Unlock()
+		}
 	}
 
 	// Списываем суммарные дельты с подписочного баланса юзеров.

@@ -346,7 +346,7 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 	// Без этого списание трафика с user-баланса для свежего профиля не работало бы
 	// до ближайшей ресинхронизации (раз в минуту).
 	if collector := h.xrayHolder.GetCollector(); collector != nil {
-		collector.RegisterProfile(newUUID, user.ID, limitBytes)
+		collector.RegisterProfile(newUUID, profile.ID, user.ID, limitBytes)
 	}
 
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
@@ -477,7 +477,7 @@ func (h *DashboardHandler) reactivateProfile(ctx context.Context, p *models.VPNP
 		}
 	}
 	if collector := h.xrayHolder.GetCollector(); collector != nil {
-		collector.RegisterProfile(p.UUID, p.UserID, limitBytes)
+		collector.RegisterProfile(p.UUID, p.ID, p.UserID, limitBytes)
 	}
 	log.Printf("Dashboard: profile %s reactivated by user", p.UUID)
 }

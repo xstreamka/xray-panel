@@ -377,7 +377,7 @@ func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if collector := h.xrayHolder.GetCollector(); collector != nil {
-			collector.RegisterProfile(profile.UUID, profile.UserID, profile.TrafficLimit)
+			collector.RegisterProfile(profile.UUID, profile.ID, profile.UserID, profile.TrafficLimit)
 		}
 		log.Printf("Admin: profile %s activated", profile.UUID)
 
@@ -445,7 +445,7 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 			client.AddUser(r.Context(), profile.UUID, profile.UUID)
 		}
 		if collector := h.xrayHolder.GetCollector(); collector != nil {
-			collector.RegisterProfile(profile.UUID, profile.UserID, profile.TrafficLimit)
+			collector.RegisterProfile(profile.UUID, profile.ID, profile.UserID, profile.TrafficLimit)
 		}
 		log.Printf("Admin: profile %s reactivated after traffic reset", profile.UUID)
 	}

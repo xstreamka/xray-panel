@@ -36,15 +36,18 @@ var migrations = []string{
 		UNIQUE(user_id, name)
 	)`,
 
+	// traffic_logs: агрегированные 5-минутные бакеты для графиков.
+	// PRIMARY KEY (profile_id, logged_at) — одна строка на профиль на бакет,
+	// UPSERT из коллектора суммирует байты за бакет. idx_logged_at — для
+	// retention-delete старых записей раз в сутки.
 	`CREATE TABLE IF NOT EXISTS traffic_logs (
-		id         SERIAL PRIMARY KEY,
-		profile_id INTEGER REFERENCES vpn_profiles(id) ON DELETE CASCADE,
+		profile_id INTEGER NOT NULL REFERENCES vpn_profiles(id) ON DELETE CASCADE,
+		logged_at  TIMESTAMPTZ NOT NULL,
 		bytes_up   BIGINT NOT NULL DEFAULT 0,
 		bytes_down BIGINT NOT NULL DEFAULT 0,
-		logged_at  TIMESTAMPTZ DEFAULT NOW()
+		PRIMARY KEY (profile_id, logged_at)
 	)`,
 
-	`CREATE INDEX IF NOT EXISTS idx_traffic_logs_profile_id ON traffic_logs(profile_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_traffic_logs_logged_at ON traffic_logs(logged_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_vpn_profiles_user_id ON vpn_profiles(user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_vpn_profiles_uuid ON vpn_profiles(uuid)`,
@@ -221,6 +224,27 @@ END $$`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_id INTEGER
 	    REFERENCES invites(id) ON DELETE SET NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_users_invite_id ON users(invite_id)`,
+
+	// Миграция старой схемы traffic_logs (SERIAL id + per-tick INSERT) на новую
+	// (агрегированные бакеты с композитным PK). Писателя у старой не было,
+	// поэтому данные не теряем. Сверху по файлу уже лежит правильный CREATE —
+	// тут только подчищаем устаревшую версию, если БД запускалась на старом коде.
+	`DO $$ BEGIN
+	    IF EXISTS (
+	        SELECT 1 FROM information_schema.columns
+	        WHERE table_name = 'traffic_logs' AND column_name = 'id'
+	    ) THEN
+	        DROP TABLE traffic_logs CASCADE;
+	        CREATE TABLE traffic_logs (
+	            profile_id INTEGER NOT NULL REFERENCES vpn_profiles(id) ON DELETE CASCADE,
+	            logged_at  TIMESTAMPTZ NOT NULL,
+	            bytes_up   BIGINT NOT NULL DEFAULT 0,
+	            bytes_down BIGINT NOT NULL DEFAULT 0,
+	            PRIMARY KEY (profile_id, logged_at)
+	        );
+	        CREATE INDEX idx_traffic_logs_logged_at ON traffic_logs(logged_at);
+	    END IF;
+	END $$`,
 }
 
 func (db *DB) Migrate() error {

@@ -46,6 +46,7 @@ func main() {
 	tariffStore := models.NewTariffStore(db.Pool)
 	receiptStore := models.NewPaymentReceiptStore(db.Pool)
 	inviteStore := models.NewInviteStore(db.Pool)
+	trafficLogStore := models.NewTrafficLogStore(db.Pool)
 
 	// Генерируем Xray config.json из БД
 	activeUUIDs, err := profileStore.GetAllActiveUUIDs(context.Background())
@@ -73,7 +74,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore, mailer, cfg.BaseURL)
+	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore, trafficLogStore, mailer, cfg.BaseURL)
 
 	subWorker := subscription.NewWorker(userStore, profileStore, mailer, xrayHolder, cfg.BaseURL)
 	go subWorker.Run(ctx)
@@ -239,6 +240,7 @@ func connectXray(
 	holder *xray.Holder,
 	profiles *models.VPNProfileStore,
 	users *models.UserStore,
+	trafficLogs *models.TrafficLogStore,
 	mailer *email.Sender,
 	baseURL string,
 ) {
@@ -264,7 +266,7 @@ func connectXray(
 
 		syncUsersToXray(ctx, client, profiles)
 
-		collector := xray.NewStatsCollector(client, profiles, users, firewall, mailer, baseURL)
+		collector := xray.NewStatsCollector(client, profiles, users, trafficLogs, firewall, mailer, baseURL)
 		collector.InitCumulative(ctx)
 		holder.SetCollector(collector)
 		collector.Run(ctx)
