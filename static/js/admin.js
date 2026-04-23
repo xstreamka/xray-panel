@@ -27,6 +27,15 @@ function refreshStats() {
                 const userBalance = card.querySelector('[data-stat="user-balance"]');
                 if (userBalance && u.balance_fmt) userBalance.textContent = u.balance_fmt;
 
+                // На карточке /admin/users/{id} — подробные счётчики подписки.
+                // В списке /admin этих элементов нет, querySelector вернёт null
+                // и обновление пропустится.
+                const userBase = card.querySelector('[data-stat="user-base"]');
+                if (userBase && u.base_fmt) userBase.textContent = u.base_fmt;
+
+                const userExtra = card.querySelector('[data-stat="user-extra"]');
+                if (userExtra && u.extra_fmt) userExtra.textContent = u.extra_fmt;
+
                 (u.profiles || []).forEach(p => {
                     const row = card.querySelector(`[data-profile-id="${p.id}"]`);
                     if (!row) return;

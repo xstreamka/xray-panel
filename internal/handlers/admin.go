@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,21 +23,90 @@ type AdminHandler struct {
 	users      *models.UserStore
 	profiles   *models.VPNProfileStore
 	tariffs    *models.TariffStore
+	invites    *models.InviteStore
 	xrayHolder *xray.Holder
 	renderer   *Renderer
+	baseURL    string
 }
 
 func NewAdminHandler(
 	users *models.UserStore,
 	profiles *models.VPNProfileStore,
 	tariffs *models.TariffStore,
+	invites *models.InviteStore,
 	xrayHolder *xray.Holder,
 	renderer *Renderer,
+	baseURL string,
 ) *AdminHandler {
 	return &AdminHandler{
-		users: users, profiles: profiles, tariffs: tariffs,
-		xrayHolder: xrayHolder, renderer: renderer,
+		users: users, profiles: profiles, tariffs: tariffs, invites: invites,
+		xrayHolder: xrayHolder, renderer: renderer, baseURL: baseURL,
 	}
+}
+
+// adminProfileView — строчка профиля с живыми данными (онлайн + IP).
+type adminProfileView struct {
+	models.VPNProfile
+	IsOnline  bool
+	OnlineIPs []string
+}
+
+// adminUserView — пользователь + агрегаты + профили. Один общий тип для
+// списка /admin и детальной карточки /admin/users/{id}, чтобы шаблоны
+// обращались к одним и тем же полям.
+type adminUserView struct {
+	models.User
+	Profiles     []adminProfileView
+	TotalTraffic int64
+	ActiveCount  int
+	OnlineCount  int
+	TariffLabel  string
+	DaysLeft     int
+}
+
+// adminRedirectBack — куда слать юзера после POST-действия.
+//   - явный return_to из формы, если он локальный (начинается с "/")
+//   - иначе Referer, если локальный
+//   - иначе /admin
+//
+// Нужно, чтобы действия, выполненные с карточки /admin/users/{id}, возвращали
+// на эту же карточку, а действия со списка /admin — на список.
+func adminRedirectBack(r *http.Request) string {
+	rt := r.FormValue("return_to")
+	if isLocalAdminPath(rt) {
+		return rt
+	}
+	if ref := r.Referer(); ref != "" {
+		// Берём только path — Referer приходит полным URL.
+		if u, err := urlParseRef(ref); err == nil && isLocalAdminPath(u) {
+			return u
+		}
+	}
+	return "/admin"
+}
+
+// isLocalAdminPath защищает от open-redirect: принимаем только пути вида
+// "/admin..." и без схемы/хоста.
+func isLocalAdminPath(p string) bool {
+	if p == "" || !strings.HasPrefix(p, "/admin") {
+		return false
+	}
+	if strings.Contains(p, "://") || strings.HasPrefix(p, "//") {
+		return false
+	}
+	return true
+}
+
+// urlParseRef вытаскивает Path из абсолютного URL Referer'а.
+func urlParseRef(ref string) (string, error) {
+	u, err := url.Parse(ref)
+	if err != nil {
+		return "", err
+	}
+	if u.Path == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	return u.Path, nil
 }
 
 // enrichAllProfiles добавляет live-трафик и онлайн-статус ко всем профилям
@@ -83,6 +153,43 @@ func (h *AdminHandler) enrichAllProfiles(ctx context.Context, profiles []models.
 	return
 }
 
+// buildUserView собирает полный view для одного юзера: агрегаты по профилям,
+// имя текущего тарифа, дни до истечения. tariffNames — кеш по ID для случаев,
+// когда view строится для списка (чтобы не дёргать GetByID в цикле).
+func (h *AdminHandler) buildUserView(
+	ctx context.Context, u models.User, profs []adminProfileView, tariffNames map[int]string,
+) adminUserView {
+	v := adminUserView{User: u, Profiles: profs}
+	for _, p := range v.Profiles {
+		v.TotalTraffic += p.TrafficUp + p.TrafficDown
+		if p.IsActive {
+			v.ActiveCount++
+		}
+		if p.IsOnline {
+			v.OnlineCount++
+		}
+	}
+	if u.CurrentTariffID != nil {
+		if tariffNames != nil {
+			if name, ok := tariffNames[*u.CurrentTariffID]; ok {
+				v.TariffLabel = name
+			}
+		}
+		if v.TariffLabel == "" {
+			if t, err := h.tariffs.GetByID(ctx, *u.CurrentTariffID); err == nil {
+				v.TariffLabel = t.Label
+			}
+		}
+	}
+	if u.TariffExpiresAt != nil {
+		d := time.Until(*u.TariffExpiresAt).Hours() / 24
+		if d > 0 {
+			v.DaysLeft = int(d) + 1
+		}
+	}
+	return v
+}
+
 func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 	users, err := h.users.List(r.Context())
 	if err != nil {
@@ -98,79 +205,88 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 
 	profiles, onlineUsers, onlineIPs := h.enrichAllProfiles(r.Context(), profiles)
 
-	// Подписочные тарифы — для селекта «задать подписку» в каждой карточке юзера
+	// Имена тарифов для отображения текущей подписки юзера
 	subPlans, err := h.tariffs.ListActiveByKind(r.Context(), models.TariffKindSubscription)
 	if err != nil {
 		log.Printf("Admin: list sub tariffs error: %v", err)
 	}
-
-	// Имена тарифов для отображения текущей подписки юзера
 	tariffNames := make(map[int]string)
 	for _, t := range subPlans {
 		tariffNames[t.ID] = t.Label
 	}
 
-	type profileView struct {
-		models.VPNProfile
-		IsOnline  bool
-		OnlineIPs []string
-	}
-
-	profilesByUser := make(map[int][]profileView)
+	profilesByUser := make(map[int][]adminProfileView)
 	for _, p := range profiles {
-		pv := profileView{
+		profilesByUser[p.UserID] = append(profilesByUser[p.UserID], adminProfileView{
 			VPNProfile: p,
 			IsOnline:   p.IsActive && onlineUsers[p.UUID],
 			OnlineIPs:  onlineIPs[p.UUID],
-		}
-		profilesByUser[p.UserID] = append(profilesByUser[p.UserID], pv)
+		})
 	}
 
-	type userView struct {
-		models.User
-		Profiles     []profileView
-		TotalTraffic int64
-		ActiveCount  int
-		OnlineCount  int
-		TariffLabel  string
-		DaysLeft     int
-	}
-
-	var views []userView
+	views := make([]adminUserView, 0, len(users))
 	for _, u := range users {
-		v := userView{User: u, Profiles: profilesByUser[u.ID]}
-		for _, p := range v.Profiles {
-			v.TotalTraffic += p.TrafficUp + p.TrafficDown
-			if p.IsActive {
-				v.ActiveCount++
-			}
-			if p.IsOnline {
-				v.OnlineCount++
-			}
-		}
-
-		if u.CurrentTariffID != nil {
-			if name, ok := tariffNames[*u.CurrentTariffID]; ok {
-				v.TariffLabel = name
-			} else if t, err := h.tariffs.GetByID(r.Context(), *u.CurrentTariffID); err == nil {
-				v.TariffLabel = t.Label
-			}
-		}
-		if u.TariffExpiresAt != nil {
-			d := time.Until(*u.TariffExpiresAt).Hours() / 24
-			if d > 0 {
-				v.DaysLeft = int(d) + 1
-			}
-		}
-
-		views = append(views, v)
+		views = append(views, h.buildUserView(r.Context(), u, profilesByUser[u.ID], tariffNames))
 	}
 
 	h.renderer.Render(w, "admin.html", map[string]any{
+		"Active": "admin",
+		"User":   middleware.UserFromContext(r.Context()),
+		"Users":  views,
+	})
+}
+
+// UserView — GET /admin/users/{id} — детальная карточка одного юзера со всеми
+// формами управления. Быстрые действия остались на списке /admin, а детальные
+// (подписка, extra, профили) доступны только отсюда.
+func (h *AdminHandler) UserView(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	u, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Пользователь не найден", http.StatusNotFound)
+		return
+	}
+
+	allProfs, err := h.profiles.GetByUserID(r.Context(), id)
+	if err != nil {
+		log.Printf("Admin: list profiles for user %d: %v", id, err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	// enrichAllProfiles умеет работать со срезом любого размера — переиспользуем.
+	enriched, onlineUsers, onlineIPs := h.enrichAllProfiles(r.Context(), allProfs)
+	profView := make([]adminProfileView, 0, len(enriched))
+	for _, p := range enriched {
+		profView = append(profView, adminProfileView{
+			VPNProfile: p,
+			IsOnline:   p.IsActive && onlineUsers[p.UUID],
+			OnlineIPs:  onlineIPs[p.UUID],
+		})
+	}
+
+	subPlans, err := h.tariffs.ListActiveByKind(r.Context(), models.TariffKindSubscription)
+	if err != nil {
+		log.Printf("Admin: list sub tariffs error: %v", err)
+	}
+
+	view := h.buildUserView(r.Context(), *u, profView, nil)
+
+	// Если юзер пришёл по инвайту, покажем кликабельный бейдж с переходом на
+	// страницу инвайта — для расследования утечки через учётку.
+	var invite *models.Invite
+	if u.InviteID != nil {
+		if inv, err := h.invites.GetByID(r.Context(), *u.InviteID); err == nil {
+			invite = inv
+		}
+	}
+
+	h.renderer.Render(w, "user.html", map[string]any{
 		"Active":   "admin",
 		"User":     middleware.UserFromContext(r.Context()),
-		"Users":    views,
+		"View":     view,
 		"SubPlans": subPlans,
+		"Invite":   invite,
+		"ReturnTo": fmt.Sprintf("/admin/users/%d", u.ID),
 	})
 }
 
@@ -217,7 +333,7 @@ func (h *AdminHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Admin: profile %s deactivated", profile.UUID)
 	}
 
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
 }
 
 func (h *AdminHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
@@ -237,7 +353,7 @@ func (h *AdminHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
 }
 
 func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +387,7 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Admin: profile %s reactivated after traffic reset", profile.UUID)
 	}
 
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
 }
 
 // SetExtraBalance — POST /admin/users/{id}/extra — установить extra-баланс
@@ -302,7 +418,7 @@ func (h *AdminHandler) SetExtraBalance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("Admin: set extra=%.2f GB for user %d", gb, userID)
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
 }
 
 // SetSubscription — POST /admin/users/{id}/subscription — активировать/продлить
@@ -352,7 +468,7 @@ func (h *AdminHandler) SetSubscription(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Admin: activated subscription user=%d tariff=%s duration=%d base=%.1f GB",
 		userID, tariff.Code, durationDays, tariff.TrafficGB)
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
 }
 
 // ToggleUserActive — POST /admin/users/{id}/toggle — включить/выключить
@@ -390,7 +506,7 @@ func (h *AdminHandler) ToggleUserActive(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
 }
 
 // CancelSubscription — POST /admin/users/{id}/subscription/cancel
@@ -408,7 +524,7 @@ func (h *AdminHandler) CancelSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	log.Printf("Admin: cancelled subscription user=%d", userID)
-	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
 }
 
 type adminProfileStatsJSON struct {
@@ -424,6 +540,8 @@ type adminUserStatsJSON struct {
 	OnlineCount int                     `json:"online_count"`
 	Total       string                  `json:"total_traffic_fmt"`
 	BalanceFmt  string                  `json:"balance_fmt"`
+	BaseFmt     string                  `json:"base_fmt"`  // "X / Y" для карточки юзера
+	ExtraFmt    string                  `json:"extra_fmt"` // "X" для карточки юзера
 	Profiles    []adminProfileStatsJSON `json:"profiles"`
 }
 
@@ -461,6 +579,8 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 		uv := adminUserStatsJSON{
 			UserID:     u.ID,
 			BalanceFmt: formatBytesGo(u.TotalAvailable()),
+			BaseFmt:    formatBytesGo(u.BaseTrafficUsed) + " / " + formatBytesGo(u.BaseTrafficLimit),
+			ExtraFmt:   formatBytesGo(u.ExtraTrafficBalance),
 		}
 		var totalTraffic int64
 		for _, p := range profilesByUser[u.ID] {
@@ -615,4 +735,126 @@ func validateTariff(t *models.Tariff) error {
 		}
 	}
 	return nil
+}
+
+// ──────────────────────────────────────────────
+// Инвайты + режим регистрации
+// ──────────────────────────────────────────────
+
+// InvitesList — GET /admin/invites — список всех инвайтов + переключатель
+// режима регистрации.
+func (h *AdminHandler) InvitesList(w http.ResponseWriter, r *http.Request) {
+	invites, err := h.invites.List(r.Context())
+	if err != nil {
+		log.Printf("Admin: list invites error: %v", err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	mode, _ := h.invites.GetRegistrationMode(r.Context())
+
+	h.renderer.Render(w, "invites.html", map[string]any{
+		"Active":         "admin-invites",
+		"User":           middleware.UserFromContext(r.Context()),
+		"Invites":        invites,
+		"Mode":           mode,
+		"BaseURL":        h.baseURL,
+		"ModeOpen":       models.RegModeOpen,
+		"ModeInviteOnly": models.RegModeInviteOnly,
+		"ModeBoth":       models.RegModeBoth,
+		"ModeDisabled":   models.RegModeDisabled,
+	})
+}
+
+// InviteCreate — POST /admin/invites — создать новый активный инвайт.
+func (h *AdminHandler) InviteCreate(w http.ResponseWriter, r *http.Request) {
+	note := strings.TrimSpace(r.FormValue("note"))
+	if utf8.RuneCountInString(note) > 255 {
+		http.Error(w, "Заметка слишком длинная (максимум 255 символов)", http.StatusBadRequest)
+		return
+	}
+	var createdBy *int
+	if u := middleware.UserFromContext(r.Context()); u != nil {
+		createdBy = &u.ID
+	}
+	if _, err := h.invites.Create(r.Context(), note, createdBy); err != nil {
+		log.Printf("Admin: invite create error: %v", err)
+		http.Error(w, "Ошибка создания инвайта", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
+}
+
+// InviteToggle — POST /admin/invites/{id}/toggle — вкл/выкл. Если инвайт
+// уже soft-deleted, кнопка в UI спрятана, но на всякий случай позволяем:
+// store не запрещает, а GetByCode всё равно такой инвайт не отдаст.
+func (h *AdminHandler) InviteToggle(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	action := r.FormValue("action")
+	var active bool
+	switch action {
+	case "activate":
+		active = true
+	case "deactivate":
+		active = false
+	default:
+		http.Error(w, "Неизвестное действие", http.StatusBadRequest)
+		return
+	}
+	if err := h.invites.SetActive(r.Context(), id, active); err != nil {
+		log.Printf("Admin: invite toggle error: %v", err)
+		http.Error(w, "Ошибка", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
+}
+
+// InviteDelete — POST /admin/invites/{id}/delete — soft-delete.
+// Физически строку не удаляем, чтобы страница «кто заинвайтился» не ломалась.
+func (h *AdminHandler) InviteDelete(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	if err := h.invites.SoftDelete(r.Context(), id); err != nil {
+		log.Printf("Admin: invite delete error: %v", err)
+		http.Error(w, "Ошибка", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
+}
+
+// InviteUsers — GET /admin/invites/{id}/users — список юзеров, пришедших
+// по конкретному инвайту. Нужно для расследования утечки ссылки.
+func (h *AdminHandler) InviteUsers(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	inv, err := h.invites.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Инвайт не найден", http.StatusNotFound)
+		return
+	}
+	users, err := h.invites.ListUsersByInvite(r.Context(), id)
+	if err != nil {
+		log.Printf("Admin: list invite users error: %v", err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	h.renderer.Render(w, "invite_users.html", map[string]any{
+		"Active": "admin-invites",
+		"User":   middleware.UserFromContext(r.Context()),
+		"Invite": inv,
+		"Users":  users,
+	})
+}
+
+// SetRegistrationMode — POST /admin/settings/registration-mode
+func (h *AdminHandler) SetRegistrationMode(w http.ResponseWriter, r *http.Request) {
+	mode := strings.TrimSpace(r.FormValue("mode"))
+	if !models.IsValidRegistrationMode(mode) {
+		http.Error(w, "Недопустимый режим", http.StatusBadRequest)
+		return
+	}
+	if err := h.invites.SetRegistrationMode(r.Context(), mode); err != nil {
+		log.Printf("Admin: set registration mode error: %v", err)
+		http.Error(w, "Ошибка", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Admin: registration mode set to %q", mode)
+	http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
 }

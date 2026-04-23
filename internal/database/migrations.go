@@ -187,6 +187,40 @@ END $$`,
 	`INSERT INTO tariffs (code, label, description, amount_rub, traffic_gb, duration_days, kind, sort_order)
 	 SELECT 'topup_20', '+20 ГБ', 'VPN Panel addon 20 GB', 200::numeric, 20::numeric, 0, 'addon', 100
 	 WHERE NOT EXISTS (SELECT 1 FROM tariffs WHERE kind = 'addon')`,
+
+	// ============================================
+	// Инвайты + режим регистрации
+	// ============================================
+
+	// Key-value настройки приложения. Сейчас хранит только registration_mode,
+	// но заведомо универсальная, чтобы не плодить по колонке на настройку.
+	`CREATE TABLE IF NOT EXISTS app_settings (
+	    key   VARCHAR(64) PRIMARY KEY,
+	    value TEXT NOT NULL
+	)`,
+
+	// registration_mode: 'open' | 'invite_only' | 'both' | 'disabled'
+	// Дефолт — 'open', чтобы на существующих установках поведение не изменилось.
+	`INSERT INTO app_settings (key, value) VALUES ('registration_mode', 'open')
+	 ON CONFLICT (key) DO NOTHING`,
+
+	`CREATE TABLE IF NOT EXISTS invites (
+	    id           SERIAL PRIMARY KEY,
+	    code         VARCHAR(32) UNIQUE NOT NULL,
+	    note         VARCHAR(255) NOT NULL DEFAULT '',
+	    is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+	    is_deleted   BOOLEAN NOT NULL DEFAULT FALSE,
+	    clicks       INTEGER NOT NULL DEFAULT 0,
+	    created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+	    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`,
+
+	// Связь юзера с инвайтом — для списка «кто пришёл по ссылке» (нужен,
+	// чтобы при утечке инвайта забанить всех, кто по нему зарегистрировался).
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_id INTEGER
+	    REFERENCES invites(id) ON DELETE SET NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_users_invite_id ON users(invite_id)`,
 }
 
 func (db *DB) Migrate() error {

@@ -11,6 +11,7 @@
         {{if .IsAdmin}}
         <a href="/admin"         {{if eq $.Active "admin"}}class="active"{{end}}>Пользователи</a>
         <a href="/admin/tariffs" {{if eq $.Active "admin-tariffs"}}class="active"{{end}}>Тарифы</a>
+        <a href="/admin/invites" {{if eq $.Active "admin-invites"}}class="active"{{end}}>Инвайты</a>
         {{end}}
         {{end}}
         <span class="nav-user">{{.Username}}</span>

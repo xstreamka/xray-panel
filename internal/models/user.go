@@ -51,6 +51,11 @@ type User struct {
 	NotifyBlock      bool `json:"notify_block"`
 	NotifyTrafficLow bool `json:"notify_traffic_low"`
 
+	// Инвайт, по которому юзер зарегистрировался. NULL для юзеров, пришедших
+	// через открытую регистрацию. Нужно админке, чтобы вывести бейдж и
+	// ссылку на страницу инвайта.
+	InviteID *int `json:"invite_id"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -86,6 +91,7 @@ const userCols = `id, username, email, is_admin, is_active, email_verified,
                   reminder_5d_sent_at, reminder_1d_sent_at, block_notified_at,
                   traffic_low_notified_at,
                   notify_topup, notify_expiration, notify_block, notify_traffic_low,
+                  invite_id,
                   created_at, updated_at`
 
 func scanUser(row interface {
@@ -99,6 +105,7 @@ func scanUser(row interface {
 		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
 		&u.TrafficLowNotifiedAt,
 		&u.NotifyTopup, &u.NotifyExpiration, &u.NotifyBlock, &u.NotifyTrafficLow,
+		&u.InviteID,
 		&u.CreatedAt, &u.UpdatedAt,
 	)
 }
@@ -115,7 +122,11 @@ func generateToken() (string, error) {
 //  Регистрация / аутентификация / верификация
 // ──────────────────────────────────────────────
 
-func (s *UserStore) Create(ctx context.Context, username, email, password string) (*User, string, error) {
+// Create создаёт нового юзера. inviteID — опциональная привязка к инвайту, по
+// которому юзер пришёл (для режимов invite_only/both). Колонка invite_id
+// объявлена ON DELETE SET NULL, так что «удаление» (физическое) инвайта — хоть
+// и не используется — связь бы не сломало.
+func (s *UserStore) Create(ctx context.Context, username, email, password string, inviteID *int) (*User, string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, "", fmt.Errorf("hash password: %w", err)
@@ -128,10 +139,10 @@ func (s *UserStore) Create(ctx context.Context, username, email, password string
 
 	u := &User{}
 	row := s.pool.QueryRow(ctx,
-		`INSERT INTO users (username, email, password_hash, email_verified, verify_token, verify_expires)
-		 VALUES ($1, $2, $3, FALSE, $4, $5)
+		`INSERT INTO users (username, email, password_hash, email_verified, verify_token, verify_expires, invite_id)
+		 VALUES ($1, $2, $3, FALSE, $4, $5, $6)
 		 RETURNING `+userCols,
-		username, email, string(hash), token, expires,
+		username, email, string(hash), token, expires, inviteID,
 	)
 	if err := scanUser(row, u); err != nil {
 		return nil, "", fmt.Errorf("insert user: %w", err)
@@ -152,6 +163,7 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
 		&u.TrafficLowNotifiedAt,
 		&u.NotifyTopup, &u.NotifyExpiration, &u.NotifyBlock, &u.NotifyTrafficLow,
+		&u.InviteID,
 		&u.CreatedAt, &u.UpdatedAt,
 		&u.PasswordHash,
 	)

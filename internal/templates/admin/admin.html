@@ -4,12 +4,12 @@
 
 {{define "content"}}
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin: 1.5rem 0;">
-    <h1>Управление пользователями</h1>
+<div style="display: flex; justify-content: space-between; align-items: center; margin: 1.5rem 0; gap: 1rem; flex-wrap: wrap;">
+    <h1 style="margin: 0;">Пользователи</h1>
     <div style="display: flex; align-items: center; gap: 0.5rem;">
         <span style="color: #94a3b8; font-size: 0.85rem;">Обновление:</span>
         <select id="refresh-interval" onchange="setRefresh(this.value)"
-            style="padding: 0.3rem 0.5rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem;">
+            style="padding: 0.3rem 0.5rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem; width: auto; margin: 0;">
             <option value="0">выкл</option>
             <option value="5">5 сек</option>
             <option value="10">10 сек</option>
@@ -21,183 +21,92 @@
     </div>
 </div>
 
-{{range .Users}}
-<div class="card" data-user-id="{{.ID}}">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
-        <div>
-            <strong style="font-size: 1.1rem;">{{.Username}}</strong>
-            <span style="color: #94a3b8; margin-left: 0.5rem;">{{.Email}}</span>
-            {{if .IsAdmin}}<span class="badge badge-green">admin</span>{{end}}
-            {{if not .IsActive}}<span class="badge badge-red">blocked</span>{{end}}
-            {{if .EmailVerified}}
-                <span class="badge badge-green">✉ verified</span>
-            {{else}}
-                <span class="badge badge-red">✉ не подтверждён</span>
-            {{end}}
-            {{if gt .OnlineCount 0}}
-                <span class="badge badge-green" data-stat="user-online">online ({{.OnlineCount}})</span>
-            {{else}}
-                <span class="badge badge-gray" data-stat="user-online">offline</span>
-            {{end}}
-        </div>
-        <div style="display: flex; gap: 1rem; align-items: center;">
-            <span class="stat" title="Профили (активные / всего)">📱 {{.ActiveCount}} / {{len .Profiles}}</span>
-            <span class="stat" data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</span>
-            {{if ne .ID $.User.ID}}
-                {{if .IsActive}}
-                <form method="POST" action="/admin/users/{{.ID}}/toggle"
-                      onsubmit="return confirm('Выключить пользователя {{.Username}}? Его выкинет из сессии, а VPN-профили отключатся.');">
-                    <input type="hidden" name="action" value="deactivate">
-                    <button type="submit" class="btn btn-sm btn-danger" title="Выключить учётку">Выкл юзера</button>
-                </form>
-                {{else}}
-                <form method="POST" action="/admin/users/{{.ID}}/toggle">
-                    <input type="hidden" name="action" value="activate">
-                    <button type="submit" class="btn btn-sm btn-primary" title="Включить учётку">Вкл юзера</button>
-                </form>
-                {{end}}
-            {{end}}
-        </div>
+<div class="card" style="margin-bottom: 1rem; padding: 0.8rem;">
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <input type="search" id="user-search" placeholder="Поиск по логину или email…" autocomplete="off"
+               style="flex: 1; margin: 0;">
+        <span id="user-search-count" style="color: #94a3b8; font-size: 0.85rem; min-width: 80px; text-align: right;"></span>
     </div>
+</div>
 
-    <!-- Подписка и баланс -->
-    <div style="margin-bottom: 0.8rem; padding: 0.7rem; background: #0f172a; border-radius: 6px;">
-        <div style="display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.6rem;">
-            <div>
-                <span style="color: #94a3b8; font-size: 0.8rem;">Подписка:</span>
+<div class="card" style="padding: 0;">
+    <table style="margin: 0;">
+        <tr>
+            <th>Пользователь</th>
+            <th>Статус</th>
+            <th>Онлайн</th>
+            <th>Профили</th>
+            <th>Σ трафика</th>
+            <th>Баланс</th>
+            <th>Подписка</th>
+            <th style="text-align: right;">Действия</th>
+        </tr>
+        {{range .Users}}
+        <tr data-user-id="{{.ID}}"
+            data-search="{{.Username}} {{.Email}}">
+            <td>
+                <a href="/admin/users/{{.ID}}" style="color: #e2e8f0; text-decoration: none;">
+                    <strong>{{.Username}}</strong>
+                </a>
+                <div style="font-size: 0.78rem; color: #94a3b8;">{{.Email}}</div>
+            </td>
+            <td>
+                {{if .IsAdmin}}<span class="badge badge-green">admin</span>{{end}}
+                {{if not .IsActive}}
+                    <span class="badge badge-red">blocked</span>
+                {{end}}
+                {{if .EmailVerified}}
+                    <span class="badge badge-green" title="Email подтверждён">✉</span>
+                {{else}}
+                    <span class="badge badge-red" title="Email не подтверждён">✉</span>
+                {{end}}
+            </td>
+            <td>
+                {{if gt .OnlineCount 0}}
+                    <span class="badge badge-green" data-stat="user-online">online ({{.OnlineCount}})</span>
+                {{else}}
+                    <span class="badge badge-gray" data-stat="user-online">offline</span>
+                {{end}}
+            </td>
+            <td title="активных / всего">{{.ActiveCount}} / {{len .Profiles}}</td>
+            <td data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</td>
+            <td data-stat="user-balance">{{formatBytes .TotalAvailable}}</td>
+            <td>
                 {{if .TariffLabel}}
-                    <strong>{{.TariffLabel}}</strong>
-                    {{if .TariffExpiresAt}}
-                        {{if gt .DaysLeft 0}}
-                            <span class="badge badge-green">до {{.TariffExpiresAt.Format "02.01.2006"}} · {{.DaysLeft}} дн.</span>
-                        {{else}}
-                            <span class="badge badge-red">истёк {{.TariffExpiresAt.Format "02.01.2006"}}</span>
-                        {{end}}
+                    {{.TariffLabel}}
+                    {{if and .TariffExpiresAt (gt .DaysLeft 0)}}
+                        <span style="color: #94a3b8; font-size: 0.8rem;">· {{.DaysLeft}} дн.</span>
+                    {{else if .TariffExpiresAt}}
+                        <span class="badge badge-red">истёк</span>
                     {{end}}
                 {{else}}
                     <span style="color: #64748b;">—</span>
                 {{end}}
-            </div>
-            <div style="display: flex; gap: 1rem; margin-left: auto;">
-                <span style="font-size: 0.85rem;" title="База">
-                    <span style="color: #94a3b8;">База:</span>
-                    <strong data-stat="user-base">{{formatBytes .BaseTrafficUsed}} / {{formatBytes .BaseTrafficLimit}}</strong>
-                </span>
-                <span style="font-size: 0.85rem;" title="Докупленный">
-                    <span style="color: #94a3b8;">Extra:</span>
-                    <strong style="color: #fcd34d;" data-stat="user-extra">{{formatBytes .ExtraTrafficBalance}}</strong>
-                </span>
-                {{if gt .FrozenExtraBalance 0}}
-                <span style="font-size: 0.85rem;" title="Заморожено">
-                    <span style="color: #94a3b8;">❄</span>
-                    <strong style="color: #60a5fa;">{{formatBytes .FrozenExtraBalance}}</strong>
-                </span>
-                {{end}}
-                <span style="font-size: 0.85rem;">
-                    <span style="color: #94a3b8;">Всего:</span>
-                    <strong data-stat="user-balance">{{formatBytes .TotalAvailable}}</strong>
-                </span>
-            </div>
-        </div>
-
-        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
-            <form method="POST" action="/admin/users/{{.ID}}/subscription" style="display: flex; gap: 0.4rem; align-items: center;">
-                <select name="tariff_id" style="padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
-                    <option value="">— тариф —</option>
-                    {{range $.SubPlans}}
-                    <option value="{{.ID}}">{{.Label}} ({{.DurationDays}} дн.)</option>
+            </td>
+            <td style="text-align: right;">
+                <div style="display: inline-flex; gap: 0.3rem;">
+                    {{if ne .ID $.User.ID}}
+                        {{if .IsActive}}
+                        <form method="POST" action="/admin/users/{{.ID}}/toggle"
+                              onsubmit="return confirm('Выключить пользователя {{.Username}}?');">
+                            <input type="hidden" name="action" value="deactivate">
+                            <button type="submit" class="btn btn-sm btn-danger" title="Выключить учётку">Выкл</button>
+                        </form>
+                        {{else}}
+                        <form method="POST" action="/admin/users/{{.ID}}/toggle">
+                            <input type="hidden" name="action" value="activate">
+                            <button type="submit" class="btn btn-sm btn-primary" title="Включить учётку">Вкл</button>
+                        </form>
+                        {{end}}
                     {{end}}
-                </select>
-                <input type="number" name="duration_days" min="0" placeholder="дн."
-                    style="width: 60px; padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;"
-                    title="Переопределить срок (пусто = как в тарифе)">
-                <button type="submit" class="btn btn-sm btn-primary">Активировать</button>
-            </form>
-            {{if .TariffLabel}}
-            <form method="POST" action="/admin/users/{{.ID}}/subscription/cancel"
-                  onsubmit="return confirm('Отменить подписку? base обнулится, extra/frozen останется.');">
-                <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Отменить подписку</button>
-            </form>
-            {{end}}
-
-            <span style="flex: 1;"></span>
-
-            <form method="POST" action="/admin/users/{{.ID}}/extra" style="display: flex; gap: 0.3rem; align-items: center;"
-                  title="Установить extra-баланс (ГБ) — и плюс, и минус">
-                <label style="color: #94a3b8; font-size: 0.8rem; margin: 0;">Extra:</label>
-                <input type="number" name="extra_gb" step="0.01" min="0" value="{{divGB .ExtraTrafficBalance}}"
-                    style="width: 80px; padding: 0.25rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
-                <span style="color: #94a3b8; font-size: 0.8rem;">ГБ</span>
-                <button type="submit" class="btn btn-sm btn-primary">Сохранить</button>
-            </form>
-        </div>
-    </div>
-
-    {{if .Profiles}}
-    <table>
-        <tr>
-            <th>Профиль</th>
-            <th>Статус</th>
-            <th>Трафик</th>
-            <th>Лимит</th>
-            <th>Действия</th>
-        </tr>
-        {{range .Profiles}}
-        <tr data-profile-id="{{.ID}}">
-            <td>
-                <strong>{{.Name}}</strong>
-                <div style="font-size: 0.7rem; color: #64748b; font-family: monospace;">{{.UUID}}</div>
-            </td>
-            <td>
-                {{if .IsActive}}
-                    {{if .IsOnline}}
-                        <span class="badge badge-green" data-stat="profile-status">● online</span>
-                        <span data-stat="profile-ips">{{range .OnlineIPs}}<span class="badge badge-blue">{{.}}</span> {{end}}</span>
-                    {{else}}
-                        <span class="badge badge-blue" data-stat="profile-status">active</span>
-                        <span data-stat="profile-ips"></span>
-                    {{end}}
-                {{else}}
-                    <span class="badge badge-red" data-stat="profile-status">disabled</span>
-                    <span data-stat="profile-ips"></span>
-                {{end}}
-            </td>
-            <td>
-                <span class="stat" data-stat="profile-traffic">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
-            </td>
-            <td>
-                <form method="POST" action="/admin/profiles/{{.ID}}/limit" style="display: flex; gap: 0.3rem; align-items: center;">
-                    <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
-                        style="width: 70px; padding: 0.2rem 0.4rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem;">
-                    <span style="color: #94a3b8; font-size: 0.8rem;">GB</span>
-                    <button type="submit" class="btn btn-sm btn-primary">OK</button>
-                </form>
-            </td>
-            <td>
-                <div style="display: flex; gap: 0.3rem;">
-                    {{if .IsActive}}
-                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle">
-                        <input type="hidden" name="action" value="deactivate">
-                        <button type="submit" class="btn btn-sm btn-danger">Откл</button>
-                    </form>
-                    {{else}}
-                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle">
-                        <input type="hidden" name="action" value="activate">
-                        <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
-                    </form>
-                    {{end}}
-                    <form method="POST" action="/admin/profiles/{{.ID}}/reset" onclick="return confirm('Сбросить трафик?')">
-                        <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Сброс</button>
-                    </form>
+                    <a href="/admin/users/{{.ID}}" class="btn btn-sm btn-primary">Открыть</a>
                 </div>
             </td>
         </tr>
         {{end}}
     </table>
-    {{else}}
-    <p style="color: #64748b;">Нет профилей</p>
-    {{end}}
 </div>
-{{end}}
+
+<script src="/static/js/admin-search.js" defer></script>
 <script src="/static/js/admin.js" defer></script>
 {{end}}

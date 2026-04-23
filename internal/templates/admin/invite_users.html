@@ -1,0 +1,67 @@
+{{template "base" .}}
+
+{{define "title"}}Пользователи инвайта — VPN Panel{{end}}
+
+{{define "content"}}
+<div style="margin: 1.5rem 0;">
+    <a href="/admin/invites" style="color: #38bdf8; font-size: 0.9rem;">← К списку инвайтов</a>
+    <h1 style="margin-top: 0.4rem;">Пользователи инвайта</h1>
+    <div style="color: #94a3b8; font-size: 0.9rem;">
+        Код: <code style="background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 4px;">{{.Invite.Code}}</code>
+        {{if .Invite.Note}}· <span>{{.Invite.Note}}</span>{{end}}
+        {{if .Invite.IsDeleted}}<span class="badge badge-red" style="margin-left: 0.4rem;">удалён</span>{{end}}
+    </div>
+</div>
+
+{{if .Users}}
+<div class="card">
+    <p style="color: #94a3b8; font-size: 0.9rem; margin-top: 0;">
+        Всего {{len .Users}} пользователей пришли по этому инвайту. Кликните «Открыть», чтобы перейти в карточку пользователя и выполнить действия (отключить учётку, отменить подписку, управлять профилями).
+    </p>
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Логин</th>
+            <th>Email</th>
+            <th>Статус</th>
+            <th>Email verified</th>
+            <th>Зарегистрирован</th>
+            <th style="text-align: right;">Действия</th>
+        </tr>
+        {{range .Users}}
+        <tr>
+            <td>{{.ID}}</td>
+            <td>
+                <a href="/admin/users/{{.ID}}" style="color: #e2e8f0; text-decoration: none;">
+                    <strong>{{.Username}}</strong>
+                </a>
+            </td>
+            <td style="font-size: 0.85rem;">{{.Email}}</td>
+            <td>
+                {{if .IsActive}}
+                    <span class="badge badge-green">активен</span>
+                {{else}}
+                    <span class="badge badge-red">выключен</span>
+                {{end}}
+            </td>
+            <td>
+                {{if .EmailVerified}}
+                    <span class="badge badge-green">✉ verified</span>
+                {{else}}
+                    <span class="badge badge-gray">не подтверждён</span>
+                {{end}}
+            </td>
+            <td style="font-size: 0.85rem; color: #94a3b8;">{{.CreatedAt.Format "02.01.2006 15:04"}}</td>
+            <td style="text-align: right;">
+                <a href="/admin/users/{{.ID}}" class="btn btn-sm btn-primary">Открыть</a>
+            </td>
+        </tr>
+        {{end}}
+    </table>
+</div>
+{{else}}
+<div class="card">
+    <p style="color: #94a3b8; margin: 0;">По этому инвайту ещё никто не зарегистрировался.</p>
+</div>
+{{end}}
+{{end}}

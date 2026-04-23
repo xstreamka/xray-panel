@@ -16,7 +16,7 @@ nav .nav-logout { color: #64748b; }
 .btn-danger { background: #ef4444; color: white; }
 .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
 input[type="text"], input[type="email"], input[type="password"],
-input[type="number"], select, textarea {
+input[type="number"], input[type="search"], select, textarea {
     width: 100%; padding: 0.55rem 0.7rem; border: 1px solid #334155; border-radius: 6px;
     background: #0f172a; color: #e2e8f0; font-size: 0.95rem; font-family: inherit;
     margin-bottom: 0.8rem;

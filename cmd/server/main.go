@@ -44,6 +44,7 @@ func main() {
 	profileStore := models.NewVPNProfileStore(db.Pool)
 	tariffStore := models.NewTariffStore(db.Pool)
 	receiptStore := models.NewPaymentReceiptStore(db.Pool)
+	inviteStore := models.NewInviteStore(db.Pool)
 
 	// Генерируем Xray config.json из БД
 	activeUUIDs, err := profileStore.GetAllActiveUUIDs(context.Background())
@@ -100,9 +101,9 @@ func main() {
 	// Лимит на запросы восстановления пароля: 3 в час с одного IP.
 	// Значение продублировано константой handlers.ResetLimitMax для UI-сноски.
 	resetLimiter := middleware.NewRateLimiter(handlers.ResetLimitMax, time.Hour)
-	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL, resetLimiter)
+	authHandler := handlers.NewAuthHandler(userStore, inviteStore, authMW, renderer, mailer, cfg.BaseURL, resetLimiter)
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, xrayHolder, cfg, renderer)
-	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, xrayHolder, renderer)
+	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, inviteStore, xrayHolder, renderer, cfg.BaseURL)
 	settingsHandler := handlers.NewSettingsHandler(userStore, renderer)
 	payHandler := handlers.NewPayHandler(
 		renderer, tariffStore, receiptStore, userStore, mailer, xrayHolder,
@@ -172,6 +173,7 @@ func main() {
 			r.Use(authMW.RequireAdmin)
 			r.Get("/admin", adminHandler.Users)
 			r.Get("/admin/stats", adminHandler.StatsJSON)
+			r.Get("/admin/users/{id}", adminHandler.UserView)
 			r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
 			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
 			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
@@ -185,6 +187,14 @@ func main() {
 			r.Post("/admin/tariffs", adminHandler.TariffCreate)
 			r.Post("/admin/tariffs/{id}", adminHandler.TariffUpdate)
 			r.Post("/admin/tariffs/{id}/delete", adminHandler.TariffDelete)
+
+			// Инвайты + режим регистрации
+			r.Get("/admin/invites", adminHandler.InvitesList)
+			r.Post("/admin/invites", adminHandler.InviteCreate)
+			r.Post("/admin/invites/{id}/toggle", adminHandler.InviteToggle)
+			r.Post("/admin/invites/{id}/delete", adminHandler.InviteDelete)
+			r.Get("/admin/invites/{id}/users", adminHandler.InviteUsers)
+			r.Post("/admin/settings/registration-mode", adminHandler.SetRegistrationMode)
 		})
 	})
 
