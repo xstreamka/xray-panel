@@ -110,7 +110,12 @@
     {{range .AddonPlans}}
     <form method="POST" action="/pay/checkout" style="margin: 0;">
         <input type="hidden" name="plan_id" value="{{.Code}}">
-        <div class="card" style="text-align: center; margin: 0; opacity: {{if $.HasActiveSub}}1{{else}}0.55{{end}};">
+        <div class="card" style="position: relative; text-align: center; margin: 0; opacity: {{if $.HasActiveSub}}1{{else}}0.55{{end}}; {{if .IsPopular}}border: 1px solid #3b82f6;{{end}}">
+            {{if .IsPopular}}
+                <div style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: #3b82f6; color: white; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem;">
+                    Популярный
+                </div>
+            {{end}}
             <div style="font-size: 1.6rem; font-weight: bold; color: #fcd34d; margin-bottom: 0.3rem;">
                 {{.Label}}
             </div>
