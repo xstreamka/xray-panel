@@ -57,6 +57,27 @@ type profileView struct {
 	Remaining     int64 // остаток ЛОКАЛЬНОГО лимита профиля (если задан)
 }
 
+// errorAction — дополнительная кнопка на странице ошибки помимо «Назад».
+type errorAction struct {
+	Label string
+	URL   string
+}
+
+// renderError рендерит полноценную HTML-страницу с ошибкой и кнопкой «Назад»
+// вместо голого http.Error — чтобы юзер не видел пустую страницу с plain text
+// после submit формы.
+func (h *DashboardHandler) renderError(w http.ResponseWriter, r *http.Request, status int, title, message string, actions ...errorAction) {
+	backURL := r.Referer()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_ = h.renderer.Render(w, "error.html", map[string]any{
+		"Title":   title,
+		"Message": message,
+		"BackURL": backURL,
+		"Actions": actions,
+	})
+}
+
 // assertBalance — централизованный gate для пользовательских write-действий
 // над профилями. Если у юзера нет доступного трафика, любые операции, способные
 // (явно или косвенно) реактивировать профиль либо запустить новый, должны быть
@@ -67,13 +88,16 @@ func (h *DashboardHandler) assertBalance(w http.ResponseWriter, r *http.Request)
 	ctxUser := middleware.UserFromContext(r.Context())
 	user, err := h.users.GetByID(r.Context(), ctxUser.ID)
 	if err != nil {
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		h.renderError(w, r, http.StatusInternalServerError, "Ошибка", "Внутренняя ошибка сервера. Попробуйте позже.")
 		return nil, false
 	}
 	if user.TotalAvailable() <= 0 {
-		http.Error(w,
-			"Нет доступного трафика. Оплатите тариф на странице /pay.",
-			http.StatusForbidden)
+		h.renderError(w, r,
+			http.StatusForbidden,
+			"Нет доступного трафика",
+			"Чтобы управлять VPN профилями, оформите или продлите тариф.",
+			errorAction{Label: "Оплатить тариф", URL: "/pay"},
+		)
 		return nil, false
 	}
 	return user, true
@@ -163,7 +187,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 
 	profiles, err := h.profiles.GetByUserID(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		h.renderError(w, r, http.StatusInternalServerError, "Ошибка", "Не удалось загрузить список профилей. Попробуйте позже.")
 		return
 	}
 
@@ -292,7 +316,7 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 	if s := strings.TrimSpace(r.FormValue("limit_gb")); s != "" {
 		limitGB, err := strconv.ParseFloat(s, 64)
 		if err != nil || limitGB < 0 {
-			http.Error(w, "Некорректное значение лимита", http.StatusBadRequest)
+			h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректное значение лимита.")
 			return
 		}
 		limitBytes = int64(limitGB * 1024 * 1024 * 1024)
@@ -302,7 +326,7 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 
 	profile, err := h.profiles.Create(r.Context(), user.ID, newUUID, name)
 	if err != nil {
-		http.Error(w, "Ошибка создания профиля: "+err.Error(), http.StatusBadRequest)
+		h.renderError(w, r, http.StatusBadRequest, "Не удалось создать профиль", err.Error())
 		return
 	}
 
@@ -340,13 +364,13 @@ func (h *DashboardHandler) SetProfileLimit(w http.ResponseWriter, r *http.Reques
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректный идентификатор профиля.")
 		return
 	}
 
 	limitGB, err := strconv.ParseFloat(strings.TrimSpace(r.FormValue("limit_gb")), 64)
 	if err != nil || limitGB < 0 {
-		http.Error(w, "Некорректное значение лимита", http.StatusBadRequest)
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректное значение лимита.")
 		return
 	}
 	limitBytes := int64(limitGB * 1024 * 1024 * 1024)
@@ -354,13 +378,13 @@ func (h *DashboardHandler) SetProfileLimit(w http.ResponseWriter, r *http.Reques
 	// Проверка ownership: юзер может менять только свои профили.
 	profile, err := h.profiles.GetByID(r.Context(), id)
 	if err != nil || profile.UserID != user.ID {
-		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		h.renderError(w, r, http.StatusNotFound, "Профиль не найден", "Проверьте, что вы редактируете свой профиль.")
 		return
 	}
 
 	if err := h.profiles.SetLimit(r.Context(), id, limitBytes); err != nil {
 		log.Printf("Dashboard: set limit error profile=%d user=%d: %v", id, user.ID, err)
-		http.Error(w, "Ошибка сохранения", http.StatusInternalServerError)
+		h.renderError(w, r, http.StatusInternalServerError, "Ошибка", "Не удалось сохранить лимит. Попробуйте позже.")
 		return
 	}
 
@@ -395,13 +419,13 @@ func (h *DashboardHandler) ToggleProfile(w http.ResponseWriter, r *http.Request)
 
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректный идентификатор профиля.")
 		return
 	}
 
 	profile, err := h.profiles.GetByID(r.Context(), id)
 	if err != nil || profile.UserID != user.ID {
-		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		h.renderError(w, r, http.StatusNotFound, "Профиль не найден", "Проверьте, что вы управляете своим профилем.")
 		return
 	}
 
@@ -415,9 +439,11 @@ func (h *DashboardHandler) ToggleProfile(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if profile.TrafficLimit > 0 && profile.TrafficUp+profile.TrafficDown >= profile.TrafficLimit {
-			http.Error(w,
-				"Лимит устройства превышен. Увеличьте лимит или поставьте 0 (безлимит) и повторите.",
-				http.StatusBadRequest)
+			h.renderError(w, r,
+				http.StatusBadRequest,
+				"Лимит устройства превышен",
+				"Увеличьте лимит или поставьте 0 (безлимит) и повторите активацию.",
+			)
 			return
 		}
 		h.reactivateProfile(r.Context(), profile, profile.TrafficLimit)
@@ -430,7 +456,7 @@ func (h *DashboardHandler) ToggleProfile(w http.ResponseWriter, r *http.Request)
 		h.deactivateProfile(r.Context(), profile)
 
 	default:
-		http.Error(w, "Unknown action", http.StatusBadRequest)
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Неизвестное действие.")
 		return
 	}
 
@@ -488,19 +514,19 @@ func (h *DashboardHandler) ResetProfileTraffic(w http.ResponseWriter, r *http.Re
 
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректный идентификатор профиля.")
 		return
 	}
 
 	profile, err := h.profiles.GetByID(r.Context(), id)
 	if err != nil || profile.UserID != user.ID {
-		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		h.renderError(w, r, http.StatusNotFound, "Профиль не найден", "Проверьте, что вы сбрасываете трафик на своём профиле.")
 		return
 	}
 
 	if err := h.profiles.ResetTraffic(r.Context(), id); err != nil {
 		log.Printf("Dashboard: reset traffic profile=%d: %v", id, err)
-		http.Error(w, "Ошибка сброса", http.StatusInternalServerError)
+		h.renderError(w, r, http.StatusInternalServerError, "Ошибка", "Не удалось сбросить трафик. Попробуйте позже.")
 		return
 	}
 
@@ -524,13 +550,13 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректный идентификатор профиля.")
 		return
 	}
 
 	profiles, err := h.profiles.GetByUserID(r.Context(), user.ID)
 	if err != nil {
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		h.renderError(w, r, http.StatusInternalServerError, "Ошибка", "Внутренняя ошибка сервера. Попробуйте позже.")
 		return
 	}
 
@@ -542,7 +568,7 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if target == nil {
-		http.Error(w, "Профиль не найден", http.StatusNotFound)
+		h.renderError(w, r, http.StatusNotFound, "Профиль не найден", "Проверьте, что вы удаляете свой профиль.")
 		return
 	}
 

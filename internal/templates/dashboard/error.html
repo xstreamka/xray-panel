@@ -1,0 +1,24 @@
+{{template "base" .}}
+
+{{define "title"}}Ошибка — Панель для клиентов{{end}}
+
+{{define "content"}}
+<div style="max-width: 500px; margin: 4rem auto;">
+    <div class="card" style="text-align: center;">
+        <h2 style="margin-bottom: 1rem;">{{if .Title}}{{.Title}}{{else}}Ошибка{{end}}</h2>
+        {{if .Message}}
+            <div class="error" style="text-align: left;">{{.Message}}</div>
+        {{end}}
+        <div style="display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; margin-top: 1rem;">
+            {{if .BackURL}}
+                <a href="{{.BackURL}}" class="btn btn-primary">Назад</a>
+            {{else}}
+                <a href="javascript:history.back()" class="btn btn-primary">Назад</a>
+            {{end}}
+            {{range .Actions}}
+                <a href="{{.URL}}" class="btn btn-primary">{{.Label}}</a>
+            {{end}}
+        </div>
+    </div>
+</div>
+{{end}}
