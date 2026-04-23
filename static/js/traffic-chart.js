@@ -87,19 +87,22 @@
                             color: '#e2e8f0',
                             boxWidth: 14,
                             boxHeight: 14,
-                            // По умолчанию Chart.js заливает кубик легенды
-                            // backgroundColor'ом датасета — у нас он намеренно
-                            // прозрачный (0.15) для мягкой area-заливки графика,
-                            // поэтому на тёмном фоне легенда выглядит как пустой
-                            // контур. Подменяем fillStyle на насыщенный borderColor.
+                            // Кубик легенды как чекбокс: активный dataset —
+                            // сплошная заливка насыщенным цветом, скрытый
+                            // (hidden=true после клика) — пустой контур того же
+                            // цвета. Дефолтный Chart.js-бихейвор берёт fillStyle
+                            // из backgroundColor датасета (у нас он намеренно
+                            // прозрачный 0.15 для area-fill), поэтому кубик
+                            // всегда выглядел «пустым» — не было визуальной
+                            // разницы между вкл/выкл.
                             generateLabels: function (chart) {
                                 const base = Chart.defaults.plugins.legend.labels.generateLabels(chart);
                                 base.forEach((item, i) => {
                                     const ds = chart.data.datasets[i];
-                                    if (ds && ds.borderColor) {
-                                        item.fillStyle = ds.borderColor;
-                                        item.strokeStyle = ds.borderColor;
-                                    }
+                                    const color = (ds && ds.borderColor) || '#94a3b8';
+                                    item.strokeStyle = color;
+                                    item.lineWidth = 2;
+                                    item.fillStyle = item.hidden ? 'transparent' : color;
                                 });
                                 return base;
                             },

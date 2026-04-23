@@ -83,16 +83,18 @@
                             color: '#e2e8f0',
                             boxWidth: 14,
                             boxHeight: 14,
-                            // См. traffic-chart.js: подменяем fillStyle, иначе
-                            // кубик легенды будет пустым контуром на тёмном фоне.
+                            // См. traffic-chart.js: активный кубик залит
+                            // насыщенным borderColor'ом, скрытый — только
+                            // контур. При клике Chart.js сам переключает hidden
+                            // и перерисовывает через generateLabels.
                             generateLabels: function (chart) {
                                 const base = Chart.defaults.plugins.legend.labels.generateLabels(chart);
                                 base.forEach((item, i) => {
                                     const ds = chart.data.datasets[i];
-                                    if (ds && ds.borderColor) {
-                                        item.fillStyle = ds.borderColor;
-                                        item.strokeStyle = ds.borderColor;
-                                    }
+                                    const color = (ds && ds.borderColor) || '#94a3b8';
+                                    item.strokeStyle = color;
+                                    item.lineWidth = 2;
+                                    item.fillStyle = item.hidden ? 'transparent' : color;
                                 });
                                 return base;
                             },
