@@ -277,19 +277,18 @@
             </td>
             <td style="text-align: right;">
                 <div style="display: inline-flex; gap: 0.3rem;">
-                    {{if .IsActive}}
-                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle">
+                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle"
+                          data-stat="profile-toggle-deactivate" style="{{if not .IsActive}}display: none;{{end}}">
                         <input type="hidden" name="action" value="deactivate">
                         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                         <button type="submit" class="btn btn-sm btn-danger">Откл</button>
                     </form>
-                    {{else}}
-                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle">
+                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle"
+                          data-stat="profile-toggle-activate" style="{{if .IsActive}}display: none;{{end}}">
                         <input type="hidden" name="action" value="activate">
                         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                         <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
                     </form>
-                    {{end}}
                     <form method="POST" action="/admin/profiles/{{.ID}}/reset" onsubmit="return confirm('Сбросить трафик?')">
                         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                         <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Сброс</button>

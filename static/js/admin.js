@@ -81,7 +81,11 @@ function refreshStats() {
                     const traffic = row.querySelector('[data-stat="profile-traffic"]');
 
                     if (status) {
-                        if (status.textContent.trim() === 'disabled') {
+                        if (!p.is_active) {
+                            status.className = 'badge badge-red';
+                            if (p.is_expired) status.textContent = 'expired';
+                            else if (p.is_over_limit) status.textContent = 'лимит';
+                            else status.textContent = 'disabled';
                         } else if (p.is_online) {
                             status.className = 'badge badge-green';
                             status.textContent = '● online';
@@ -93,12 +97,18 @@ function refreshStats() {
 
                     if (ipsEl) {
                         const ips = p.online_ips || [];
-                        if (p.is_online && ips.length > 0) {
+                        if (p.is_active && p.is_online && ips.length > 0) {
                             ipsEl.innerHTML = ips.map(ip => '<span class="badge badge-blue">' + ip + '</span> ').join('');
                         } else {
                             ipsEl.innerHTML = '';
                         }
                     }
+
+                    // Кнопки Откл/Вкл — переключаем по is_active.
+                    const btnDeact = row.querySelector('[data-stat="profile-toggle-deactivate"]');
+                    const btnAct = row.querySelector('[data-stat="profile-toggle-activate"]');
+                    if (btnDeact) btnDeact.style.display = p.is_active ? '' : 'none';
+                    if (btnAct) btnAct.style.display = p.is_active ? 'none' : '';
 
                     if (traffic) traffic.textContent = '↑' + p.traffic_up_fmt + ' ↓' + p.traffic_down_fmt;
 

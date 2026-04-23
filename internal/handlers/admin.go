@@ -592,7 +592,10 @@ func (h *AdminHandler) CancelSubscription(w http.ResponseWriter, r *http.Request
 
 type adminProfileStatsJSON struct {
 	ID              int      `json:"id"`
+	IsActive        bool     `json:"is_active"`
 	IsOnline        bool     `json:"is_online"`
+	IsExpired       bool     `json:"is_expired"`
+	IsOverLimit     bool     `json:"is_over_limit"`
 	OnlineIPs       []string `json:"online_ips"`
 	TrafficUp       string   `json:"traffic_up_fmt"`
 	TrafficDown     string   `json:"traffic_down_fmt"`
@@ -710,9 +713,14 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 				profPct = int(float64(used) / float64(p.TrafficLimit) * 100)
 				profColor = progressColor(profPct)
 			}
+			isExpired := p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now())
+			isOverLimit := p.TrafficLimit > 0 && profTotal >= p.TrafficLimit
 			uv.Profiles = append(uv.Profiles, adminProfileStatsJSON{
 				ID:              p.ID,
+				IsActive:        p.IsActive,
 				IsOnline:        p.IsOnline,
+				IsExpired:       isExpired,
+				IsOverLimit:     isOverLimit,
 				OnlineIPs:       p.OnlineIPs,
 				TrafficUp:       formatBytesGo(p.TrafficUp),
 				TrafficDown:     formatBytesGo(p.TrafficDown),
