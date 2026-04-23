@@ -1,0 +1,20 @@
+{{define "nav"}}
+{{if .}}{{with .User}}
+<nav>
+    <span class="brand">VPN Panel</span>
+    <div class="nav-links">
+        {{if .EmailVerified}}
+        <a href="/"          {{if eq $.Active "welcome"}}class="active"{{end}}>Главная</a>
+        <a href="/dashboard" {{if eq $.Active "dashboard"}}class="active"{{end}}>Мои профили</a>
+        <a href="/pay"       {{if eq $.Active "pay"}}class="active"{{end}}>Оплата</a>
+        {{if .IsAdmin}}
+        <a href="/admin"         {{if eq $.Active "admin"}}class="active"{{end}}>Пользователи</a>
+        <a href="/admin/tariffs" {{if eq $.Active "admin-tariffs"}}class="active"{{end}}>Тарифы</a>
+        {{end}}
+        {{end}}
+        <span class="nav-user">{{.Username}}</span>
+        <a href="/logout" class="nav-logout">Выход</a>
+    </div>
+</nav>
+{{end}}{{end}}
+{{end}}

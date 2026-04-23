@@ -100,6 +100,7 @@ func (h *PayHandler) Index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, "pay.html", map[string]any{
+		"Active":        "pay",
 		"User":          user,
 		"SubPlans":      subPlans,
 		"AddonPlans":    addonPlans,
@@ -400,17 +401,18 @@ func (h *PayHandler) History(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, "payments_history.html", map[string]any{
-		"User":         user,
-		"Receipts":     receipts,
-		"Labels":       labels,
-		"SubCount":     subCount,
-		"SubRub":       subRub,
-		"SubBytes":     subBytes,
-		"AddonCount":   addonCount,
-		"AddonRub":     addonRub,
-		"AddonBytes":   addonBytes,
-		"TotalRub":     subRub + addonRub,
-		"TotalCount":   subCount + addonCount,
+		"Active":     "pay",
+		"User":       user,
+		"Receipts":   receipts,
+		"Labels":     labels,
+		"SubCount":   subCount,
+		"SubRub":     subRub,
+		"SubBytes":   subBytes,
+		"AddonCount": addonCount,
+		"AddonRub":   addonRub,
+		"AddonBytes": addonBytes,
+		"TotalRub":   subRub + addonRub,
+		"TotalCount": subCount + addonCount,
 	})
 }
 

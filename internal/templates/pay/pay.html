@@ -2,20 +2,6 @@
 
 {{define "title"}}Пополнение — VPN Panel{{end}}
 
-{{define "nav"}}
-<nav>
-    <span class="brand">VPN Panel</span>
-    <div>
-        <a href="/">Главная</a>
-        <a href="/dashboard">Мои профили</a>
-        <a href="/pay" style="color: #f1f5f9;">Оплата</a>
-        {{if .User.IsAdmin}}<a href="/admin">Админка</a>{{end}}
-        <a href="/logout">Выход</a>
-        <span style="color: #e2e8f0;">{{.User.Username}}</span>
-    </div>
-</nav>
-{{end}}
-
 {{define "content"}}
 
 {{if eq .Status "success"}}

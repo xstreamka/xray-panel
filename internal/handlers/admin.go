@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
 	"xray-panel/internal/xray"
 
@@ -166,6 +167,8 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, "admin.html", map[string]any{
+		"Active":   "admin",
+		"User":     middleware.UserFromContext(r.Context()),
 		"Users":    views,
 		"SubPlans": subPlans,
 	})
@@ -455,6 +458,8 @@ func (h *AdminHandler) TariffsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderer.Render(w, "tariffs.html", map[string]any{
+		"Active":  "admin-tariffs",
+		"User":    middleware.UserFromContext(r.Context()),
 		"Tariffs": tariffs,
 	})
 }

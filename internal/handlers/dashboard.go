@@ -127,6 +127,7 @@ func (h *DashboardHandler) Welcome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, "welcome.html", map[string]any{
+		"Active":              "welcome",
 		"User":                user,
 		"TariffLabel":         tariffLabel,
 		"HasActiveSub":        user.HasActiveSubscription(),
@@ -239,6 +240,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, "dashboard.html", map[string]any{
+		"Active":         "dashboard",
 		"User":           user,
 		"Profiles":       views,
 		"TariffLabel":    tariffLabel,

@@ -2,20 +2,6 @@
 
 {{define "title"}}История платежей — VPN Panel{{end}}
 
-{{define "nav"}}
-<nav>
-    <span class="brand">VPN Panel</span>
-    <div>
-        <a href="/">Главная</a>
-        <a href="/dashboard">Мои профили</a>
-        <a href="/pay">Пополнить</a>
-        <span style="color: #e2e8f0;">{{.User.Username}}</span>
-        {{if .User.IsAdmin}}<a href="/admin">Админка</a>{{end}}
-        <a href="/logout">Выход</a>
-    </div>
-</nav>
-{{end}}
-
 {{define "content"}}
 <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
     <h2 style="margin: 0;">История платежей</h2>

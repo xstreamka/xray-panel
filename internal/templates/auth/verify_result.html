@@ -8,9 +8,9 @@
         {{if .Success}}
             <h2 style="margin-bottom: 1rem;">✅ Email подтверждён!</h2>
             <p style="color: #94a3b8; margin-bottom: 1.5rem;">
-                Аккаунт активирован. Пополните баланс и создайте VPN профиль.
+                Аккаунт активирован. <br>Пополните баланс и создайте VPN профиль.
             </p>
-            <a href="/dashboard" class="btn btn-primary">Перейти в панель</a>
+            <a href="/" class="btn btn-primary">Перейти на главную</a>
         {{else}}
             <h2 style="margin-bottom: 1rem;">❌ Ошибка</h2>
             {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
