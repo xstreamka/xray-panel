@@ -100,6 +100,20 @@ function refreshStats() {
             if (frozenBlock) frozenBlock.style.display = data.frozen_balance > 0 ? '' : 'none';
             if (frozenEl) frozenEl.textContent = data.frozen_balance_fmt;
 
+            // Запрещаем создавать профили и включать выключенные, если баланс 0:
+            // иначе профиль на пару секунд оживёт и тут же будет убит коллектором.
+            const noBalance = (data.balance || 0) <= 0;
+            const blockedTitle = 'Нет доступного трафика. Оплатите тариф.';
+            document.querySelectorAll('[data-stat="create-profile-btn"], [data-stat="activate-btn"]').forEach(btn => {
+                btn.disabled = noBalance;
+                if (noBalance) {
+                    btn.dataset.origTitle = btn.dataset.origTitle || btn.title;
+                    btn.title = blockedTitle;
+                } else if (btn.dataset.origTitle !== undefined) {
+                    btn.title = btn.dataset.origTitle;
+                }
+            });
+
             (data.profiles || []).forEach(s => {
                 const card = document.querySelector(`[data-profile-id="${s.id}"]`);
                 if (!card) return;

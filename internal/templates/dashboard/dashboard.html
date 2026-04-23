@@ -99,7 +99,8 @@
             <label for="limit_gb">Личный лимит, ГБ</label>
             <input type="number" id="limit_gb" name="limit_gb" step="0.5" min="0" value="0" style="margin-bottom: 0;">
         </div>
-        <button type="submit" class="btn btn-primary">Создать профиль</button>
+        <button type="submit" class="btn btn-primary" data-stat="create-profile-btn"
+                {{if le .TotalAvailable 0}}disabled title="Нет доступного трафика. Оплатите тариф."{{end}}>Создать профиль</button>
     </form>
     <p style="color: #64748b; font-size: 0.8rem; margin-top: 0.6rem;">
         Трафик всех профилей списывается из общего баланса подписки. Личный лимит — опционально, для ограничения конкретного устройства (0 = без лимита).
@@ -139,7 +140,8 @@
             {{else}}
             <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
                 <input type="hidden" name="action" value="activate">
-                <button type="submit" class="btn btn-sm btn-primary" title="Включить профиль">Вкл</button>
+                <button type="submit" class="btn btn-sm btn-primary" data-stat="activate-btn"
+                        {{if le $.TotalAvailable 0}}disabled title="Нет доступного трафика. Оплатите тариф."{{else}}title="Включить профиль"{{end}}>Вкл</button>
             </form>
             {{end}}
             <form method="POST" action="/dashboard/profiles/{{.ID}}/reset" style="display:inline;"

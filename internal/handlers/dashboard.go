@@ -375,9 +375,8 @@ func (h *DashboardHandler) SetProfileLimit(w http.ResponseWriter, r *http.Reques
 // трафика сохраняется — после включения будет продолжаться с того же числа.
 //
 // Форма передаёт action=activate или action=deactivate.
-// При активации проверяется personal-лимит: если TrafficLimit>0 и уже превышен,
-// просим юзера сначала сменить лимит. User-баланс здесь не проверяется —
-// коллектор отсечёт профиль в ближайшем тике, если баланс 0.
+// При активации проверяется personal-лимит и общий баланс юзера: иначе
+// профиль включился бы на пару секунд и тут же выключился коллектором.
 func (h *DashboardHandler) ToggleProfile(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
@@ -397,6 +396,17 @@ func (h *DashboardHandler) ToggleProfile(w http.ResponseWriter, r *http.Request)
 	case "activate":
 		if profile.IsActive {
 			http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+			return
+		}
+		// Свежий юзер для актуального баланса — кэш контекста мог отставать
+		// от только что выполненного списания / отмены подписки.
+		if fresh, err := h.users.GetByID(r.Context(), user.ID); err == nil {
+			user = fresh
+		}
+		if user.TotalAvailable() <= 0 {
+			http.Error(w,
+				"Нет доступного трафика. Оплатите тариф на странице /pay.",
+				http.StatusBadRequest)
 			return
 		}
 		if profile.TrafficLimit > 0 && profile.TrafficUp+profile.TrafficDown >= profile.TrafficLimit {
