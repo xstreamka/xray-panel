@@ -355,6 +355,44 @@ func (h *AdminHandler) SetSubscription(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
+// ToggleUserActive — POST /admin/users/{id}/toggle — включить/выключить
+// учётную запись. При выключении немедленно рвём сессию (на следующем запросе
+// юзера выкинет middleware) и отключаем все его VPN-профили через Xray —
+// чтобы уже подключённые клиенты не продолжали жить до перезапуска.
+// При включении профили назад не поднимаем: если нужно — админ делает это
+// кнопкой на конкретном профиле.
+func (h *AdminHandler) ToggleUserActive(w http.ResponseWriter, r *http.Request) {
+	userID, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	action := r.FormValue("action")
+
+	switch action {
+	case "activate":
+		if err := h.users.SetActive(r.Context(), userID, true); err != nil {
+			log.Printf("Admin: SetActive(true) user=%d: %v", userID, err)
+			http.Error(w, "Ошибка активации", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Admin: user %d activated", userID)
+
+	case "deactivate":
+		if err := h.users.SetActive(r.Context(), userID, false); err != nil {
+			log.Printf("Admin: SetActive(false) user=%d: %v", userID, err)
+			http.Error(w, "Ошибка деактивации", http.StatusInternalServerError)
+			return
+		}
+		if collector := h.xrayHolder.GetCollector(); collector != nil {
+			collector.DisconnectUserAll(r.Context(), userID, "user deactivated by admin")
+		}
+		log.Printf("Admin: user %d deactivated", userID)
+
+	default:
+		http.Error(w, "Неизвестное действие", http.StatusBadRequest)
+		return
+	}
+
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
 // CancelSubscription — POST /admin/users/{id}/subscription/cancel
 // Обнуляет подписку (current_tariff_id, tariff_expires_at, base_limit, base_used).
 // extra и frozen не трогает — админ может отдельно списать, если нужно.

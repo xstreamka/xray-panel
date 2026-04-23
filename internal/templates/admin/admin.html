@@ -43,6 +43,20 @@
         <div style="display: flex; gap: 1rem; align-items: center;">
             <span class="stat" title="Профили (активные / всего)">📱 {{.ActiveCount}} / {{len .Profiles}}</span>
             <span class="stat" data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</span>
+            {{if ne .ID $.User.ID}}
+                {{if .IsActive}}
+                <form method="POST" action="/admin/users/{{.ID}}/toggle"
+                      onsubmit="return confirm('Выключить пользователя {{.Username}}? Его выкинет из сессии, а VPN-профили отключатся.');">
+                    <input type="hidden" name="action" value="deactivate">
+                    <button type="submit" class="btn btn-sm btn-danger" title="Выключить учётку">Выкл юзера</button>
+                </form>
+                {{else}}
+                <form method="POST" action="/admin/users/{{.ID}}/toggle">
+                    <input type="hidden" name="action" value="activate">
+                    <button type="submit" class="btn btn-sm btn-primary" title="Включить учётку">Вкл юзера</button>
+                </form>
+                {{end}}
+            {{end}}
         </div>
     </div>
 

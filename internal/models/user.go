@@ -15,6 +15,11 @@ import (
 // ErrInsufficientTraffic — юзеру нечего списывать (base+extra=0)
 var ErrInsufficientTraffic = errors.New("insufficient traffic")
 
+// ErrUserDeactivated — юзер помечен is_active = FALSE. Возвращается из
+// Authenticate, чтобы вызывающий код мог показать отдельное сообщение
+// («пользователь выключен») вместо общего «неверный логин/пароль».
+var ErrUserDeactivated = errors.New("user is deactivated")
+
 type User struct {
 	ID            int        `json:"id"`
 	Username      string     `json:"username"`
@@ -139,13 +144,31 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 	if err != nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	if !u.IsActive {
-		return nil, fmt.Errorf("user is deactivated")
-	}
+	// Пароль проверяем в первую очередь, чтобы не раскрывать факт
+	// деактивации посторонним перебором логинов.
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		return nil, fmt.Errorf("invalid password")
 	}
+	if !u.IsActive {
+		return nil, ErrUserDeactivated
+	}
 	return u, nil
+}
+
+// SetActive меняет is_active у юзера. Используется админкой для
+// включения/выключения учётки.
+func (s *UserStore) SetActive(ctx context.Context, userID int, active bool) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2`,
+		active, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
 }
 
 func (s *UserStore) VerifyEmail(ctx context.Context, token string) (*User, error) {
@@ -164,30 +187,45 @@ func (s *UserStore) VerifyEmail(ctx context.Context, token string) (*User, error
 }
 
 // CreateResetToken генерирует одноразовый токен восстановления для юзера,
-// найденного по логину ИЛИ email (case-insensitive по email). Если такого нет —
-// возвращает (nil, "", "", nil): вызывающий код должен в любом случае отвечать
-// одинаково, чтобы по ответу нельзя было выяснить наличие аккаунта.
+// найденного по логину ИЛИ email (case-insensitive по email). Возвращаемые
+// значения:
+//   - (nil, "", "", nil) — юзера нет; вызывающий код показывает универсальный
+//     успех, чтобы по ответу нельзя было выяснить наличие аккаунта.
+//   - (nil, "", "", ErrUserDeactivated) — юзер есть, но выключен; админка
+//     просит показывать это открыто, так что вызывающий код рендерит отдельное
+//     сообщение. Это сознательно ослабляет anti-enumeration ради UX.
+//   - (id, email, token, nil) — токен выпущен, нужно отправить письмо.
+//
 // Токен живёт 1 час.
 func (s *UserStore) CreateResetToken(ctx context.Context, loginOrEmail string) (userID *int, email, token string, err error) {
+	var id int
+	var em string
+	var active bool
+	lookupErr := s.pool.QueryRow(ctx,
+		`SELECT id, email, is_active FROM users
+		 WHERE username = $1 OR LOWER(email) = LOWER($1)`,
+		loginOrEmail,
+	).Scan(&id, &em, &active)
+	if lookupErr != nil {
+		// Пользователь не найден — штатный путь, ошибкой не считаем.
+		return nil, "", "", nil
+	}
+	if !active {
+		return nil, "", "", ErrUserDeactivated
+	}
+
 	tok, err := generateToken()
 	if err != nil {
 		return nil, "", "", fmt.Errorf("generate token: %w", err)
 	}
 	expires := time.Now().Add(1 * time.Hour)
 
-	var id int
-	var em string
-	row := s.pool.QueryRow(ctx,
-		`UPDATE users
-		 SET reset_token = $1, reset_expires = $2, updated_at = NOW()
-		 WHERE (username = $3 OR LOWER(email) = LOWER($3))
-		   AND is_active = TRUE
-		 RETURNING id, email`,
-		tok, expires, loginOrEmail,
-	)
-	if scanErr := row.Scan(&id, &em); scanErr != nil {
-		// Не считаем «нет такого юзера» ошибкой — это нормальный путь
-		return nil, "", "", nil
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE users SET reset_token = $1, reset_expires = $2, updated_at = NOW()
+		 WHERE id = $3`,
+		tok, expires, id,
+	); err != nil {
+		return nil, "", "", fmt.Errorf("set reset token: %w", err)
 	}
 	return &id, em, tok, nil
 }

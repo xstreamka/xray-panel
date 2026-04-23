@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"strings"
@@ -10,6 +12,12 @@ import (
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
 )
+
+// msgUserDeactivated — текст для формы входа и редиректа из middleware,
+// когда учётка помечена is_active=FALSE. Единое место, чтобы формулировка
+// совпадала во всех точках. Тип template.HTML, т.к. внутри есть <br>,
+// который html/template иначе бы заэкранировал в &lt;br&gt;.
+const msgUserDeactivated template.HTML = "Пользователь выключен.<br>Вход невозможен, обратитесь к администратору."
 
 type AuthHandler struct {
 	users        *models.UserStore
@@ -32,7 +40,13 @@ func NewAuthHandler(users *models.UserStore, auth *middleware.AuthMiddleware, re
 }
 
 func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
-	h.renderer.Render(w, "login.html", nil)
+	data := map[string]any{}
+	// ?deactivated=1 — юзер был выкинут из сессии middleware'ом из-за
+	// is_active=FALSE. Показываем осмысленное сообщение.
+	if r.URL.Query().Get("deactivated") == "1" {
+		data["Error"] = msgUserDeactivated
+	}
+	h.renderer.Render(w, "login.html", data)
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -42,8 +56,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	user, err := h.users.Authenticate(r.Context(), username, password)
 	if err != nil {
 		log.Printf("Login failed for %s: %v", username, err)
-		h.renderer.Render(w, "login.html", map[string]string{
-			"Error": "Неверный логин или пароль",
+		// any: сюда кладётся либо string (экранируется автоматически),
+		// либо template.HTML для сообщений с разметкой вроде <br>.
+		var errMsg any = "Неверный логин или пароль"
+		if errors.Is(err, models.ErrUserDeactivated) {
+			errMsg = msgUserDeactivated
+		}
+		h.renderer.Render(w, "login.html", map[string]any{
+			"Error": errMsg,
 		})
 		return
 	}
@@ -204,8 +224,9 @@ func (h *AuthHandler) ForgotPasswordPage(w http.ResponseWriter, r *http.Request)
 }
 
 // ForgotPassword — POST: отправка письма со ссылкой.
-// Ответ всегда одинаковый (даже если юзера нет), чтобы не раскрывать наличие
-// аккаунта в системе.
+// Для отсутствующего юзера отвечаем универсально, чтобы не раскрывать наличие
+// аккаунта. Для выключенного (is_active=FALSE) — по просьбе админки явно
+// сообщаем «пользователь выключен». Это сознательный компромисс UX ↔ privacy.
 func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	loginOrEmail := strings.TrimSpace(r.FormValue("login_or_email"))
 
@@ -229,6 +250,15 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID, emailAddr, token, err := h.users.CreateResetToken(r.Context(), loginOrEmail)
+	if errors.Is(err, models.ErrUserDeactivated) {
+		h.renderer.Render(w, "forgot_password.html", map[string]any{
+			"LimitMax":     ResetLimitMax,
+			"LimitWindow":  ResetLimitWindow,
+			"Error":        template.HTML("Пользователь выключен.<br>Восстановление пароля невозможно, обратитесь к администратору."),
+			"LoginOrEmail": loginOrEmail,
+		})
+		return
+	}
 	if err != nil {
 		log.Printf("CreateResetToken failed for %q: %v", loginOrEmail, err)
 	}

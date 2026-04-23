@@ -37,6 +37,14 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
+		// Если юзера деактивировали, пока он был в сессии — очищаем
+		// cookie и редиректим на логин с пометкой, чтобы форма показала
+		// осмысленное сообщение вместо пустого редиректа.
+		if !user.IsActive {
+			m.ClearSession(w)
+			http.Redirect(w, r, "/login?deactivated=1", http.StatusSeeOther)
+			return
+		}
 		ctx := context.WithValue(r.Context(), userContextKey, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
