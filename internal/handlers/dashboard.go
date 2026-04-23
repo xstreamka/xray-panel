@@ -57,6 +57,28 @@ type profileView struct {
 	Remaining     int64 // остаток ЛОКАЛЬНОГО лимита профиля (если задан)
 }
 
+// assertBalance — централизованный gate для пользовательских write-действий
+// над профилями. Если у юзера нет доступного трафика, любые операции, способные
+// (явно или косвенно) реактивировать профиль либо запустить новый, должны быть
+// отклонены — иначе профиль на пару секунд оживёт и тут же будет вырублен
+// коллектором (плохой UX и пустая нагрузка). Возвращает свежего юзера из БД,
+// чтобы вызывающий код использовал его для дальнейшей логики.
+func (h *DashboardHandler) assertBalance(w http.ResponseWriter, r *http.Request) (*models.User, bool) {
+	ctxUser := middleware.UserFromContext(r.Context())
+	user, err := h.users.GetByID(r.Context(), ctxUser.ID)
+	if err != nil {
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return nil, false
+	}
+	if user.TotalAvailable() <= 0 {
+		http.Error(w,
+			"Нет доступного трафика. Оплатите тариф на странице /pay.",
+			http.StatusForbidden)
+		return nil, false
+	}
+	return user, true
+}
+
 func (h *DashboardHandler) enrichProfiles(ctx context.Context, profiles []models.VPNProfile) (
 	enriched []models.VPNProfile,
 	onlineUsers map[string]bool,
@@ -255,25 +277,13 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r.Context())
+	user, ok := h.assertBalance(w, r)
+	if !ok {
+		return
+	}
 	name := r.FormValue("name")
 	if name == "" {
 		name = "default"
-	}
-
-	// Свежий юзер — для актуальной проверки баланса
-	freshUser, err := h.users.GetByID(r.Context(), user.ID)
-	if err == nil {
-		user = freshUser
-	}
-
-	// В новой модели профиль — это просто устройство. Нет смысла создавать,
-	// если у юзера вообще нет доступного трафика: enforce сразу его отключит.
-	// Поэтому сразу говорим "сначала оплатите".
-	if user.TotalAvailable() <= 0 {
-		http.Error(w, "Нет доступного трафика. Оплатите тариф на странице /pay.",
-			http.StatusBadRequest)
-		return
 	}
 
 	// limit_gb теперь опционален: это ЛОКАЛЬНЫЙ лимит устройства (parental).
@@ -322,7 +332,10 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 // или меняет personal-лимит своего профиля (0 = безлимит, трафик списывается
 // только из общего подписочного пула).
 func (h *DashboardHandler) SetProfileLimit(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r.Context())
+	user, ok := h.assertBalance(w, r)
+	if !ok {
+		return
+	}
 
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.Atoi(idStr)
@@ -398,15 +411,7 @@ func (h *DashboardHandler) ToggleProfile(w http.ResponseWriter, r *http.Request)
 			http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 			return
 		}
-		// Свежий юзер для актуального баланса — кэш контекста мог отставать
-		// от только что выполненного списания / отмены подписки.
-		if fresh, err := h.users.GetByID(r.Context(), user.ID); err == nil {
-			user = fresh
-		}
-		if user.TotalAvailable() <= 0 {
-			http.Error(w,
-				"Нет доступного трафика. Оплатите тариф на странице /pay.",
-				http.StatusBadRequest)
+		if _, ok := h.assertBalance(w, r); !ok {
 			return
 		}
 		if profile.TrafficLimit > 0 && profile.TrafficUp+profile.TrafficDown >= profile.TrafficLimit {
@@ -476,7 +481,10 @@ func (h *DashboardHandler) deactivateProfile(ctx context.Context, p *models.VPNP
 // юзера не трогает — он считается централизованно в user-модели.
 // Если профиль был отключён по personal-лимиту — реактивируем.
 func (h *DashboardHandler) ResetProfileTraffic(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r.Context())
+	user, ok := h.assertBalance(w, r)
+	if !ok {
+		return
+	}
 
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -509,7 +517,10 @@ func (h *DashboardHandler) ResetProfileTraffic(w http.ResponseWriter, r *http.Re
 }
 
 func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r.Context())
+	user, ok := h.assertBalance(w, r)
+	if !ok {
+		return
+	}
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
