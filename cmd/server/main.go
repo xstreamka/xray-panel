@@ -120,10 +120,6 @@ func main() {
 	fs := http.FileServer(http.Dir("static"))
 	r.Handle("/static/*", http.StripPrefix("/static/", fs))
 
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
-	})
-
 	// Публичные роуты
 	r.Get("/login", authHandler.LoginPage)
 	r.With(loginLimiter.Middleware).Post("/login", authHandler.Login)
@@ -152,6 +148,7 @@ func main() {
 		r.Use(authMW.RequireAuth)
 		r.Use(authMW.RequireVerified)
 
+		r.Get("/", dashHandler.Welcome)
 		r.Get("/dashboard", dashHandler.Index)
 		r.Get("/dashboard/stats", dashHandler.StatsJSON)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)

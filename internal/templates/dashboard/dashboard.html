@@ -6,9 +6,12 @@
 <nav>
     <span class="brand">VPN Panel</span>
     <div>
-        <span style="color: #e2e8f0;">{{.User.Username}}</span>
+        <a href="/">Главная</a>
+        <a href="/dashboard" style="color: #f1f5f9;">Мои профили</a>
+        <a href="/pay">Оплата</a>
         {{if .User.IsAdmin}}<a href="/admin">Админка</a>{{end}}
         <a href="/logout">Выход</a>
+        <span style="color: #e2e8f0;">{{.User.Username}}</span>
     </div>
 </nav>
 {{end}}

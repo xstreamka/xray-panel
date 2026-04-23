@@ -1,0 +1,536 @@
+{{template "base" .}}
+
+{{define "title"}}Главная — VPN Panel{{end}}
+
+{{define "nav"}}
+<nav>
+    <span class="brand">VPN Panel</span>
+    <div>
+        <a href="/" style="color: #f1f5f9;">Главная</a>
+        <a href="/dashboard">Мои профили</a>
+        <a href="/pay">Оплата</a>
+        {{if .User.IsAdmin}}<a href="/admin">Админка</a>{{end}}
+        <a href="/logout">Выход</a>
+        <span style="color: #e2e8f0;">{{.User.Username}}</span>
+    </div>
+</nav>
+{{end}}
+
+{{define "content"}}
+<style>
+    .hero {
+        background: linear-gradient(135deg, #1e3a8a 0%, #0f766e 100%);
+        border-radius: 16px;
+        padding: 2.5rem 2rem;
+        margin-top: 1.5rem;
+        margin-bottom: 1.5rem;
+        position: relative;
+        overflow: hidden;
+    }
+    .hero::before {
+        content: '';
+        position: absolute;
+        top: -50%; right: -20%;
+        width: 400px; height: 400px;
+        background: radial-gradient(circle, rgba(56, 189, 248, 0.2), transparent 70%);
+        pointer-events: none;
+    }
+    .hero h1 {
+        font-size: 2rem;
+        margin-bottom: 0.6rem;
+        color: #f1f5f9;
+    }
+    .hero .subtitle {
+        color: #cbd5e1;
+        font-size: 1.05rem;
+        max-width: 700px;
+        line-height: 1.5;
+        margin-bottom: 1.2rem;
+    }
+    .hero-actions {
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        position: relative;
+    }
+    .hero .btn-primary {
+        padding: 0.7rem 1.3rem;
+        font-size: 1rem;
+    }
+    .hero .btn-ghost {
+        background: rgba(255,255,255,0.1);
+        color: #f1f5f9;
+        border: 1px solid rgba(255,255,255,0.25);
+        padding: 0.7rem 1.3rem;
+        font-size: 1rem;
+    }
+    .hero .btn-ghost:hover { background: rgba(255,255,255,0.18); }
+
+    .sub-status {
+        display: flex;
+        gap: 0.7rem;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid rgba(255,255,255,0.15);
+        color: #cbd5e1;
+        font-size: 0.92rem;
+    }
+
+    .section-title {
+        font-size: 1.4rem;
+        margin: 2rem 0 1rem;
+        color: #f1f5f9;
+    }
+    .section-subtitle {
+        color: #94a3b8;
+        margin-top: -0.5rem;
+        margin-bottom: 2rem;
+        font-size: 0.95rem;
+    }
+
+    .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1rem;
+    }
+    .feature-card {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 1.2rem;
+        transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+    .feature-card:hover {
+        border-color: #3b82f6;
+        transform: translateY(-2px);
+    }
+    .feature-icon {
+        width: 42px; height: 42px;
+        border-radius: 10px;
+        background: #1e3a5f;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.4rem;
+        margin-bottom: 0.7rem;
+    }
+    .feature-card h3 {
+        color: #f1f5f9;
+        font-size: 1.05rem;
+        margin-bottom: 0.4rem;
+    }
+    .feature-card p {
+        color: #94a3b8;
+        font-size: 0.9rem;
+        line-height: 1.5;
+    }
+
+    .steps {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+        counter-reset: step;
+    }
+    .step {
+        background: #1e293b;
+        border-radius: 12px;
+        padding: 1.2rem;
+        position: relative;
+        counter-increment: step;
+    }
+    .step::before {
+        content: counter(step);
+        position: absolute;
+        top: -14px; left: 1.2rem;
+        width: 32px; height: 32px;
+        background: #3b82f6;
+        color: white;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-weight: bold;
+        font-size: 0.95rem;
+    }
+    .step h4 {
+        color: #f1f5f9;
+        font-size: 1rem;
+        margin: 0.4rem 0 0.4rem;
+    }
+    .step p {
+        color: #94a3b8;
+        font-size: 0.88rem;
+        line-height: 1.5;
+    }
+
+    .tariffs {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1rem;
+    }
+    .tariff {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 1.4rem;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+    }
+    .tariff.popular {
+        border-color: #38bdf8;
+        box-shadow: 0 0 0 1px #38bdf8 inset;
+    }
+    .tariff.popular::before {
+        content: 'Популярный';
+        position: absolute;
+        top: -12px; right: 1rem;
+        background: #38bdf8;
+        color: #0f172a;
+        padding: 0.2rem 0.7rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    .tariff h3 {
+        color: #f1f5f9;
+        font-size: 1.15rem;
+        margin-bottom: 0.3rem;
+    }
+    .tariff .price {
+        font-size: 1.6rem;
+        font-weight: bold;
+        color: #38bdf8;
+        margin: 0.5rem 0;
+    }
+    .tariff .price small { font-size: 0.9rem; color: #94a3b8; font-weight: normal; }
+    .tariff .traffic {
+        color: #e2e8f0;
+        font-size: 0.95rem;
+        margin-bottom: 0.3rem;
+    }
+    .tariff .duration {
+        color: #94a3b8;
+        font-size: 0.85rem;
+        margin-bottom: 0.8rem;
+    }
+    .tariff .desc {
+        color: #94a3b8;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        flex: 1;
+        margin-bottom: 1rem;
+    }
+
+    .faq-item {
+        background: #1e293b;
+        border-radius: 10px;
+        margin-bottom: 0.6rem;
+        overflow: hidden;
+    }
+    .faq-item summary {
+        padding: 1rem 1.2rem;
+        cursor: pointer;
+        color: #f1f5f9;
+        font-weight: 500;
+        user-select: none;
+        list-style: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .faq-item summary::-webkit-details-marker { display: none; }
+    .faq-item summary::after {
+        content: '+';
+        font-size: 1.4rem;
+        color: #64748b;
+        transition: transform 0.2s;
+    }
+    .faq-item[open] summary::after { transform: rotate(45deg); }
+    .faq-item p {
+        padding: 0 1.2rem 1.1rem;
+        color: #94a3b8;
+        font-size: 0.92rem;
+        line-height: 1.6;
+    }
+
+    .cta-card {
+        background: linear-gradient(135deg, #1e293b, #0f172a);
+        border: 1px solid #334155;
+        border-radius: 14px;
+        padding: 1.8rem;
+        text-align: center;
+        margin-top: 2rem;
+    }
+    .cta-card h2 {
+        color: #f1f5f9;
+        margin-bottom: 0.5rem;
+    }
+    .cta-card p {
+        color: #94a3b8;
+        margin-bottom: 1.2rem;
+    }
+</style>
+
+<div class="hero">
+    <h1>Добро пожаловать, {{.User.Username}}! 👋</h1>
+    <p class="subtitle">
+        Быстрый и надёжный VPN на основе протокола VLESS + Reality.
+        <br>Открывает доступ к любым сайтам, работает на всех устройствах и не тормозит.
+        <br>Работает через каскад: сервер в РФ + сервер в Амстердаме. Без рекламы на ютубе.
+        <br>Трафик на все ресурсы из РФ идет напрямую через российский IP, а все остальное через IP в Амстердаме, поэтому не нужно постоянно выключать VPN.
+        <br>Адреса в "белом списке", работает даже при блокировках.
+    </p>
+    <div class="hero-actions">
+        {{if .HasActiveSub}}
+            <a href="/dashboard" class="btn btn-primary">Перейти в панель</a>
+            <a href="/pay" class="btn btn-ghost">Продлить / докупить трафик</a>
+        {{else}}
+            <a href="/pay" class="btn btn-primary">Оформить подписку</a>
+            <a href="/dashboard" class="btn btn-ghost">К моим профилям</a>
+        {{end}}
+    </div>
+
+    <div class="sub-status">
+        {{if .HasActiveSub}}
+            <span>✅ Активная подписка:</span>
+            <strong style="color: #f1f5f9;">{{.TariffLabel}}</strong>
+            {{if .User.TariffExpiresAt}}
+                <span>· действует до <strong style="color: #f1f5f9;">{{.User.TariffExpiresAt.Format "02.01.2006"}}</strong></span>
+            {{end}}
+        {{else if .TariffLabel}}
+            <span>⚠ Подписка истекла —</span>
+            <strong style="color: #f1f5f9;">{{.TariffLabel}}</strong>
+            <a href="/pay" style="color: #38bdf8; text-decoration: underline;">продлить</a>
+        {{else}}
+            <span>ℹ Подписка не оформлена.</span>
+            <a href="/pay" style="color: #38bdf8; text-decoration: underline;">Выберите тариф</a>
+        {{end}}
+    </div>
+</div>
+
+<h2 class="section-title">Что такое VPN и как это работает</h2>
+<p class="section-subtitle">
+    VPN (Virtual Private Network) — это шифрованный туннель между вашим устройством
+    и нашим сервером. Весь трафик проходит через сервер, поэтому провайдер и сайты
+    видят только соединение с ним, а не с реальными ресурсами.
+</p>
+
+<div class="features">
+    <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>Шифрование на базе Reality</h3>
+        <p>
+            Используем VLESS + Reality — современный протокол, который маскирует
+            VPN-трафик под обычное HTTPS-соединение. Обход блокировок без замедления.
+        </p>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Высокая скорость</h3>
+        <p>
+            Сервер на мощном канале в нейтральной локации. Минимальные задержки,
+            подходит для видео, игр и стриминга в 4K.
+        </p>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">📱</div>
+        <h3>Все устройства</h3>
+        <p>
+            Android, iOS, Windows, macOS, Linux. Работает через любой клиент
+            с поддержкой VLESS: v2RayTun, AmneziaVPN, Hiddify, v2rayNG, NekoBox, FoXray.
+        </p>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">🧩</div>
+        <h3>До нескольких устройств</h3>
+        <p>
+            Создавайте отдельные профили для телефона, ноутбука, планшета.
+            Каждый — с собственной ссылкой и QR-кодом.
+        </p>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Прозрачный трафик</h3>
+        <p>
+            Весь расход виден в реальном времени. На каждое устройство
+            можно задать личный лимит — удобно для родительского контроля.
+        </p>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">💳</div>
+        <h3>Гибкая оплата</h3>
+        <p>
+            Подписка с пакетом трафика плюс возможность докупить
+            дополнительные гигабайты в любой момент, без смены тарифа.
+        </p>
+    </div>
+</div>
+
+<h2 class="section-title">Как начать пользоваться</h2>
+<p class="section-subtitle">Четыре простых шага — и вы онлайн.</p>
+
+<div class="steps">
+    <div class="step">
+        <h4>Оформите тариф</h4>
+        <p>
+            Выберите подходящий пакет трафика и срок на
+            <a href="/pay" style="color: #38bdf8;">странице оплаты</a>.
+            После подтверждения платежа подписка активируется автоматически.
+        </p>
+    </div>
+    <div class="step">
+        <h4>Создайте профиль</h4>
+        <p>
+            В разделе <a href="/dashboard" style="color: #38bdf8;">«Мои профили»</a>
+            создайте профиль под каждое устройство: телефон, ноутбук, планшет.
+        </p>
+    </div>
+    <div class="step">
+        <h4>Установите клиент</h4>
+        <p>
+            Скачайте VPN-приложение для своей платформы. Рекомендуем
+            <strong>v2RayTun</strong> или <strong>AmneziaVPN</strong> — оба есть на
+            Android, iOS, Windows, macOS и Linux. Также подойдут Hiddify,
+            v2rayNG (Android), NekoBox или FoXray.
+        </p>
+    </div>
+    <div class="step">
+        <h4>Подключите ссылку</h4>
+        <p>
+            Скопируйте VLESS-ссылку или отсканируйте QR-код из карточки профиля —
+            клиент сам создаст конфигурацию. Нажмите «Connect» — всё готово.
+        </p>
+    </div>
+</div>
+
+{{if .SubscriptionTariffs}}
+<h2 class="section-title">Тарифы и пакеты</h2>
+<p class="section-subtitle">
+    Трафик из подписки общий на все ваши устройства. Если не хватает —
+    всегда можно докупить дополнительный пакет, не меняя тариф.
+</p>
+
+<div class="tariffs">
+    {{range .SubscriptionTariffs}}
+    <div class="tariff{{if .IsPopular}} popular{{end}}">
+        <h3>{{.Label}}</h3>
+        <div class="price">
+            {{printf "%.0f" .AmountRub}} ₽
+            <small>/ {{.DurationDays}} дн.</small>
+        </div>
+        <div class="traffic">📦 {{printf "%.0f" .TrafficGB}} ГБ трафика</div>
+        {{if .Description}}
+        <div class="desc">{{.Description}}</div>
+        {{else}}
+        <div class="desc">Полный доступ, неограниченное число профилей.</div>
+        {{end}}
+        <a href="/pay" class="btn btn-primary" style="text-align:center;">Оформить</a>
+    </div>
+    {{end}}
+</div>
+{{end}}
+
+{{if .AddonTariffs}}
+<h2 class="section-title">Дополнительный трафик</h2>
+<p class="section-subtitle">
+    Докупить можно в любой момент поверх активной подписки.
+    Трафик сохраняется до конца периода подписки.
+</p>
+
+<div class="tariffs">
+    {{range .AddonTariffs}}
+    <div class="tariff">
+        <h3>{{.Label}}</h3>
+        <div class="price">
+            {{printf "%.0f" .AmountRub}} ₽
+        </div>
+        <div class="traffic">📦 +{{printf "%.0f" .TrafficGB}} ГБ</div>
+        {{if .Description}}
+        <div class="desc">{{.Description}}</div>
+        {{else}}
+        <div class="desc">Добавляется к текущей подписке сразу после оплаты.</div>
+        {{end}}
+        <a href="/pay" class="btn btn-primary" style="text-align:center;">Докупить</a>
+    </div>
+    {{end}}
+</div>
+{{end}}
+
+<h2 class="section-title">Частые вопросы</h2>
+
+<details class="faq-item">
+    <summary>На скольких устройствах можно использовать VPN?</summary>
+    <p>
+        Ограничения по количеству устройств нет — создавайте столько профилей,
+        сколько нужно. Трафик у них общий: списывается из баланса подписки.
+        Если хотите ограничить трафик для конкретного устройства —
+        задайте ему личный лимит в карточке профиля.
+    </p>
+</details>
+
+<details class="faq-item">
+    <summary>Что будет, если закончится трафик?</summary>
+    <p>
+        Когда общий баланс подписки опустится до нуля, все ваши профили будут
+        автоматически отключены. Чтобы продолжить пользоваться VPN,
+        докупите дополнительный пакет на странице оплаты —
+        профили сразу же включатся обратно.
+    </p>
+</details>
+
+<details class="faq-item">
+    <summary>Какое приложение использовать?</summary>
+    <p>
+        Любое с поддержкой VLESS + Reality. Проще всего —
+        <strong>v2RayTun</strong> или <strong>AmneziaVPN</strong>: оба работают
+        на всех платформах (Android, iOS, Windows, macOS, Linux) и понимают
+        VLESS-ссылку сразу.
+        <br><br>
+        Альтернативы:
+        <strong>Android</strong> — Hiddify, v2rayNG, NekoBox;
+        <strong>iOS</strong> — Hiddify, FoXray, Streisand;
+        <strong>Windows / macOS / Linux</strong> — Hiddify, NekoBox, v2rayN.
+        Подключение одинаковое везде: вставить ссылку или отсканировать QR-код.
+    </p>
+</details>
+
+<details class="faq-item">
+    <summary>Можно ли временно выключить профиль?</summary>
+    <p>
+        Да. В карточке любого профиля есть кнопка «Выкл» — после этого
+        ссылка временно перестанет работать, но статистика и настройки
+        сохранятся. Повторно включить можно в один клик.
+    </p>
+</details>
+
+<details class="faq-item">
+    <summary>Что такое «замороженный» трафик?</summary>
+    <p>
+        Если у вас остался докупленный трафик на момент продления подписки,
+        он не сгорает, а замораживается и возвращается после новой оплаты.
+        Так деньги, потраченные на доп. пакеты, не пропадают.
+    </p>
+</details>
+
+<details class="faq-item">
+    <summary>Насколько это безопасно?</summary>
+    <p>
+        Мы используем современный протокол VLESS с Reality-маскировкой:
+        трафик шифруется и визуально неотличим от обычного HTTPS.
+        Мы не ведём логи посещаемых сайтов, а ваш трафик не видят
+        ни интернет-провайдер, ни посторонние.
+    </p>
+</details>
+
+<div class="cta-card">
+    {{if .HasActiveSub}}
+        <h2>Уже готовы подключиться?</h2>
+        <p>Перейдите в панель, создайте профиль и поделитесь ссылкой между устройствами.</p>
+        <a href="/dashboard" class="btn btn-primary">Открыть мою панель</a>
+    {{else}}
+        <h2>Готовы попробовать?</h2>
+        <p>Выберите подходящий тариф — подписка активируется автоматически после оплаты.</p>
+        <a href="/pay" class="btn btn-primary">Выбрать тариф</a>
+    {{end}}
+</div>
+
+{{end}}

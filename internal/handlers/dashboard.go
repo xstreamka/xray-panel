@@ -100,6 +100,41 @@ func (h *DashboardHandler) enrichProfiles(ctx context.Context, profiles []models
 	return
 }
 
+// Welcome — главная страница после авторизации.
+// Показывает приветствие, статус подписки, описание сервиса и актуальные тарифы.
+func (h *DashboardHandler) Welcome(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	freshUser, _ := h.users.GetByID(r.Context(), user.ID)
+	if freshUser != nil {
+		user = freshUser
+	}
+
+	var tariffLabel string
+	if user.CurrentTariffID != nil {
+		if t, err := h.tariffs.GetByID(r.Context(), *user.CurrentTariffID); err == nil {
+			tariffLabel = t.Label
+		}
+	}
+
+	subPlans, err := h.tariffs.ListActiveByKind(r.Context(), models.TariffKindSubscription)
+	if err != nil {
+		log.Printf("Welcome: list sub tariffs error: %v", err)
+	}
+	addonPlans, err := h.tariffs.ListActiveByKind(r.Context(), models.TariffKindAddon)
+	if err != nil {
+		log.Printf("Welcome: list addon tariffs error: %v", err)
+	}
+
+	h.renderer.Render(w, "welcome.html", map[string]any{
+		"User":                user,
+		"TariffLabel":         tariffLabel,
+		"HasActiveSub":        user.HasActiveSubscription(),
+		"SubscriptionTariffs": subPlans,
+		"AddonTariffs":        addonPlans,
+	})
+}
+
 func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
