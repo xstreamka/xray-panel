@@ -155,6 +155,8 @@
             {{if .IsActive}}
             <button class="btn btn-sm btn-primary" onclick="copyURI(this)" data-uri="{{.VlessURI}}">Копировать</button>
             <button class="btn btn-sm btn-primary" onclick="showQR(this)" data-uri="{{.VlessURI}}">QR</button>
+            <button class="btn btn-sm btn-primary" onclick="showProfileChart(this)"
+                    data-profile-id="{{.ID}}" data-profile-name="{{.Name}}">График</button>
             <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
                 <input type="hidden" name="action" value="deactivate">
                 <button type="submit" class="btn btn-sm" style="background: #475569; color: white;" title="Выключить профиль (можно включить позже)">Выкл</button>
@@ -230,6 +232,33 @@
     </div>
 </div>
 
+<!-- Модалка с графиком профиля -->
+<div id="profile-chart-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:100; align-items:center; justify-content:center; padding: 1rem;"
+     onclick="if(event.target===this) this.style.display='none'">
+    <div style="background: #1e293b; padding: 1.25rem; border-radius: 12px; width: 100%; max-width: 720px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.8rem; flex-wrap:wrap; margin-bottom:1rem;">
+            <h3 style="margin:0;">Трафик: <span id="profile-chart-name" style="color:#94a3b8;"></span></h3>
+            <div style="display:flex; gap:0.3rem; flex-wrap:wrap;">
+                <div id="profile-chart-range" style="display:flex; gap:0.3rem; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-sm btn-primary" data-range="24h">24 часа</button>
+                    <button type="button" class="btn btn-sm" data-range="7d"  style="background:#334155; color:#e2e8f0;">7 дней</button>
+                    <button type="button" class="btn btn-sm" data-range="30d" style="background:#334155; color:#e2e8f0;">30 дней</button>
+                    <button type="button" class="btn btn-sm" data-range="90d" style="background:#334155; color:#e2e8f0;">90 дней</button>
+                </div>
+                <button type="button" class="btn btn-sm" style="background:#475569; color:white;"
+                        onclick="document.getElementById('profile-chart-modal').style.display='none'">✕</button>
+            </div>
+        </div>
+        <div style="position:relative; height:320px;">
+            <canvas id="profile-chart-canvas"></canvas>
+            <div id="profile-chart-empty" style="position:absolute; inset:0; display:none; align-items:center; justify-content:center; color:#64748b; font-size:0.9rem;">
+                Нет данных за выбранный период
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="/static/js/qrcode.min.js?v={{assetVersion}}"></script>
 <script src="/static/js/dashboard.js?v={{assetVersion}}" defer></script>
+<script src="/static/js/profile-chart.js?v={{assetVersion}}" defer></script>
 {{end}}

@@ -747,37 +747,32 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
+// resolveTrafficRange маппит ?range=... на период + гранулярность.
+// Общий код для дашборд-чарта и per-profile чарта. Чтобы число точек не
+// выходило за ~300 (Chart.js дальше ощутимо тормозит).
+func resolveTrafficRange(rangeStr string) (from time.Time, bucket models.TrafficBucket, ok bool) {
+	now := time.Now()
+	switch rangeStr {
+	case "", "24h":
+		return now.Add(-24 * time.Hour), models.TrafficBucket5Min, true
+	case "7d":
+		return now.Add(-7 * 24 * time.Hour), models.TrafficBucketHour, true
+	case "30d":
+		return now.Add(-30 * 24 * time.Hour), models.TrafficBucketDay, true
+	case "90d":
+		return now.Add(-90 * 24 * time.Hour), models.TrafficBucketDay, true
+	default:
+		return time.Time{}, "", false
+	}
+}
+
 // TrafficChart — GET /dashboard/traffic?range=24h|7d|30d|90d.
-// Отдаёт агрегированные точки трафика юзера для line-chart на дашборде.
-// Гранулярность привязана к периоду: 24h — raw 5-мин, 7d — час, 30d/90d — сутки,
-// чтобы число точек на графике не выходило за ~300 (Chart.js дальше тупит).
+// Отдаёт агрегированные точки трафика юзера (сумма по всем его профилям).
 func (h *DashboardHandler) TrafficChart(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 
-	rangeStr := r.URL.Query().Get("range")
-	if rangeStr == "" {
-		rangeStr = "24h"
-	}
-
-	var (
-		from   time.Time
-		bucket models.TrafficBucket
-	)
-	now := time.Now()
-	switch rangeStr {
-	case "24h":
-		from = now.Add(-24 * time.Hour)
-		bucket = models.TrafficBucket5Min
-	case "7d":
-		from = now.Add(-7 * 24 * time.Hour)
-		bucket = models.TrafficBucketHour
-	case "30d":
-		from = now.Add(-30 * 24 * time.Hour)
-		bucket = models.TrafficBucketDay
-	case "90d":
-		from = now.Add(-90 * 24 * time.Hour)
-		bucket = models.TrafficBucketDay
-	default:
+	from, bucket, ok := resolveTrafficRange(r.URL.Query().Get("range"))
+	if !ok {
 		http.Error(w, "invalid range", http.StatusBadRequest)
 		return
 	}
@@ -795,9 +790,49 @@ func (h *DashboardHandler) TrafficChart(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"range":  rangeStr,
+		"range":  r.URL.Query().Get("range"),
 		"bucket": bucket,
 		"points": points,
+	})
+}
+
+// ProfileTrafficChart — GET /dashboard/profiles/{id}/traffic?range=...
+// Точки трафика одного профиля. Ownership-check делается внутри SQL
+// (AggregateByProfile JOIN'ит на vpn_profiles.user_id), поэтому чужой
+// profile_id вернёт просто пустой массив, без 403 — не даёт перебором
+// определить, есть ли такой id в системе.
+func (h *DashboardHandler) ProfileTrafficChart(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	profileID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	from, bucket, ok := resolveTrafficRange(r.URL.Query().Get("range"))
+	if !ok {
+		http.Error(w, "invalid range", http.StatusBadRequest)
+		return
+	}
+
+	points, err := h.trafficLogs.AggregateByProfile(r.Context(), profileID, user.ID, from, bucket)
+	if err != nil {
+		log.Printf("ProfileTrafficChart: aggregate profile=%d user=%d: %v", profileID, user.ID, err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if points == nil {
+		points = []models.TrafficPoint{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"range":      r.URL.Query().Get("range"),
+		"bucket":     bucket,
+		"profile_id": profileID,
+		"points":     points,
 	})
 }
 

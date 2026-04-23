@@ -155,8 +155,53 @@ func (s *TrafficLogStore) AggregateByUser(
 	return points, rows.Err()
 }
 
-// RangeByProfile — будущий ридер для per-device графиков. Пока не используется,
-// но оставлен в API: когда понадобится разбивка «телефон vs ноут», будет готов.
+// AggregateByProfile — то же, что AggregateByUser, но по одному профилю.
+// Ownership-фильтр встроен в SQL (profile_id И user_id) — нельзя спросить
+// данные чужого профиля, даже если знаешь его id.
+func (s *TrafficLogStore) AggregateByProfile(
+	ctx context.Context, profileID, userID int, from time.Time, bucket TrafficBucket,
+) ([]TrafficPoint, error) {
+	var truncExpr string
+	switch bucket {
+	case TrafficBucket5Min:
+		truncExpr = "logged_at"
+	case TrafficBucketHour:
+		truncExpr = "date_trunc('hour', logged_at)"
+	case TrafficBucketDay:
+		truncExpr = "date_trunc('day', logged_at)"
+	default:
+		return nil, fmt.Errorf("unknown bucket: %s", bucket)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT %s AS t, SUM(bytes_up)::bigint AS up, SUM(bytes_down)::bigint AS down
+		FROM traffic_logs
+		WHERE profile_id = $1
+		  AND profile_id IN (SELECT id FROM vpn_profiles WHERE user_id = $2)
+		  AND logged_at >= $3
+		GROUP BY 1
+		ORDER BY 1 ASC`, truncExpr)
+
+	rows, err := s.pool.Query(ctx, q, profileID, userID, from)
+	if err != nil {
+		return nil, fmt.Errorf("traffic aggregate profile: %w", err)
+	}
+	defer rows.Close()
+
+	var points []TrafficPoint
+	for rows.Next() {
+		var p TrafficPoint
+		if err := rows.Scan(&p.Time, &p.BytesUp, &p.BytesDown); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
+// RangeByProfile — сырые бакеты одного профиля без агрегации. Пока не
+// используется хендлерами (дашборд работает через AggregateByProfile), но
+// оставлен в API: может пригодиться для экспорта/CSV/отладки.
 func (s *TrafficLogStore) RangeByProfile(ctx context.Context, profileID int, from, to time.Time) ([]TrafficLog, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT profile_id, logged_at, bytes_up, bytes_down

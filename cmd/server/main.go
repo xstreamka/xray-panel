@@ -164,6 +164,7 @@ func main() {
 		r.Get("/dashboard", dashHandler.Index)
 		r.Get("/dashboard/stats", dashHandler.StatsJSON)
 		r.Get("/dashboard/traffic", dashHandler.TrafficChart)
+		r.Get("/dashboard/profiles/{id}/traffic", dashHandler.ProfileTrafficChart)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
 		r.Post("/dashboard/profiles/{id}/limit", dashHandler.SetProfileLimit)
 		r.Post("/dashboard/profiles/{id}/toggle", dashHandler.ToggleProfile)
