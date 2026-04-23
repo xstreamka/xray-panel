@@ -108,7 +108,7 @@ func main() {
 	// Значение продублировано константой handlers.ResetLimitMax для UI-сноски.
 	resetLimiter := middleware.NewRateLimiter(handlers.ResetLimitMax, time.Hour)
 	authHandler := handlers.NewAuthHandler(userStore, inviteStore, authMW, renderer, mailer, cfg.BaseURL, resetLimiter)
-	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, xrayHolder, cfg, renderer)
+	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, trafficLogStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, inviteStore, xrayHolder, renderer, cfg.BaseURL)
 	settingsHandler := handlers.NewSettingsHandler(userStore, renderer)
 	// Лимит обратной связи: 3 сообщения в час с одного IP — чтобы форму
@@ -163,6 +163,7 @@ func main() {
 		r.Get("/", dashHandler.Welcome)
 		r.Get("/dashboard", dashHandler.Index)
 		r.Get("/dashboard/stats", dashHandler.StatsJSON)
+		r.Get("/dashboard/traffic", dashHandler.TrafficChart)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
 		r.Post("/dashboard/profiles/{id}/limit", dashHandler.SetProfileLimit)
 		r.Post("/dashboard/profiles/{id}/toggle", dashHandler.ToggleProfile)

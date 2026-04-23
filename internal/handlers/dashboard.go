@@ -22,25 +22,28 @@ import (
 )
 
 type DashboardHandler struct {
-	profiles   *models.VPNProfileStore
-	users      *models.UserStore
-	tariffs    *models.TariffStore
-	xrayHolder *xray.Holder
-	cfg        *config.Config
-	renderer   *Renderer
+	profiles    *models.VPNProfileStore
+	users       *models.UserStore
+	tariffs     *models.TariffStore
+	trafficLogs *models.TrafficLogStore
+	xrayHolder  *xray.Holder
+	cfg         *config.Config
+	renderer    *Renderer
 }
 
 func NewDashboardHandler(
 	profiles *models.VPNProfileStore,
 	users *models.UserStore,
 	tariffs *models.TariffStore,
+	trafficLogs *models.TrafficLogStore,
 	xrayHolder *xray.Holder,
 	cfg *config.Config,
 	renderer *Renderer,
 ) *DashboardHandler {
 	return &DashboardHandler{
 		profiles: profiles, users: users, tariffs: tariffs,
-		xrayHolder: xrayHolder, cfg: cfg, renderer: renderer,
+		trafficLogs: trafficLogs,
+		xrayHolder:  xrayHolder, cfg: cfg, renderer: renderer,
 	}
 }
 
@@ -742,6 +745,60 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// TrafficChart — GET /dashboard/traffic?range=24h|7d|30d|90d.
+// Отдаёт агрегированные точки трафика юзера для line-chart на дашборде.
+// Гранулярность привязана к периоду: 24h — raw 5-мин, 7d — час, 30d/90d — сутки,
+// чтобы число точек на графике не выходило за ~300 (Chart.js дальше тупит).
+func (h *DashboardHandler) TrafficChart(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	rangeStr := r.URL.Query().Get("range")
+	if rangeStr == "" {
+		rangeStr = "24h"
+	}
+
+	var (
+		from   time.Time
+		bucket models.TrafficBucket
+	)
+	now := time.Now()
+	switch rangeStr {
+	case "24h":
+		from = now.Add(-24 * time.Hour)
+		bucket = models.TrafficBucket5Min
+	case "7d":
+		from = now.Add(-7 * 24 * time.Hour)
+		bucket = models.TrafficBucketHour
+	case "30d":
+		from = now.Add(-30 * 24 * time.Hour)
+		bucket = models.TrafficBucketDay
+	case "90d":
+		from = now.Add(-90 * 24 * time.Hour)
+		bucket = models.TrafficBucketDay
+	default:
+		http.Error(w, "invalid range", http.StatusBadRequest)
+		return
+	}
+
+	points, err := h.trafficLogs.AggregateByUser(r.Context(), user.ID, from, bucket)
+	if err != nil {
+		log.Printf("TrafficChart: aggregate user=%d: %v", user.ID, err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if points == nil {
+		points = []models.TrafficPoint{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"range":  rangeStr,
+		"bucket": bucket,
+		"points": points,
+	})
 }
 
 func formatBytesGo(b int64) string {

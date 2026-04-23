@@ -90,8 +90,73 @@ func (s *TrafficLogStore) DeleteOlderThan(ctx context.Context, cutoff time.Time)
 	return tag.RowsAffected(), nil
 }
 
-// RangeByProfile — будущий ридер для графиков. Возвращает бакеты одного
-// профиля за диапазон, упорядоченные по времени. Пока не используется.
+// TrafficPoint — одна точка на графике: время бакета + суммарные up/down
+// по всем профилям юзера в этом бакете.
+type TrafficPoint struct {
+	Time      time.Time `json:"t"`
+	BytesUp   int64     `json:"up"`
+	BytesDown int64     `json:"down"`
+}
+
+// TrafficBucket — уровень агрегации для AggregateByUser. Выбирается хендлером
+// в зависимости от запрошенного периода: 24h — raw 5-мин бакеты, 7d — часовые,
+// 30d/90d — дневные. Whitelist защищает от SQL-injection через параметр.
+type TrafficBucket string
+
+const (
+	TrafficBucket5Min TrafficBucket = "5min"
+	TrafficBucketHour TrafficBucket = "hour"
+	TrafficBucketDay  TrafficBucket = "day"
+)
+
+// AggregateByUser суммирует трафик всех профилей юзера по выбранной гранулярности
+// за период [from, now). Возвращает только бакеты с данными — отсутствующие
+// моменты фронт отрисует как пропуски (gap в line-chart).
+func (s *TrafficLogStore) AggregateByUser(
+	ctx context.Context, userID int, from time.Time, bucket TrafficBucket,
+) ([]TrafficPoint, error) {
+	// Жёсткий whitelist: значение подставляется в SQL как литерал date_trunc,
+	// параметризовать единицу date_trunc нельзя.
+	var truncExpr string
+	switch bucket {
+	case TrafficBucket5Min:
+		// raw-бакеты уже 5-минутные, group-by не нужен — просто SUM по профилям
+		truncExpr = "logged_at"
+	case TrafficBucketHour:
+		truncExpr = "date_trunc('hour', logged_at)"
+	case TrafficBucketDay:
+		truncExpr = "date_trunc('day', logged_at)"
+	default:
+		return nil, fmt.Errorf("unknown bucket: %s", bucket)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT %s AS t, SUM(bytes_up)::bigint AS up, SUM(bytes_down)::bigint AS down
+		FROM traffic_logs
+		WHERE profile_id IN (SELECT id FROM vpn_profiles WHERE user_id = $1)
+		  AND logged_at >= $2
+		GROUP BY 1
+		ORDER BY 1 ASC`, truncExpr)
+
+	rows, err := s.pool.Query(ctx, q, userID, from)
+	if err != nil {
+		return nil, fmt.Errorf("traffic aggregate: %w", err)
+	}
+	defer rows.Close()
+
+	var points []TrafficPoint
+	for rows.Next() {
+		var p TrafficPoint
+		if err := rows.Scan(&p.Time, &p.BytesUp, &p.BytesDown); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}
+
+// RangeByProfile — будущий ридер для per-device графиков. Пока не используется,
+// но оставлен в API: когда понадобится разбивка «телефон vs ноут», будет готов.
 func (s *TrafficLogStore) RangeByProfile(ctx context.Context, profileID int, from, to time.Time) ([]TrafficLog, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT profile_id, logged_at, bytes_up, bytes_down
