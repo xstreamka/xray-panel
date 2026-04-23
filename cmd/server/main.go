@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -78,6 +79,9 @@ func main() {
 	go subWorker.Run(ctx)
 
 	// Шаблоны
+	// assetVersion — busts browser cache для css/js при каждом рестарте панели,
+	// чтобы клиенты гарантированно получали новый бандл после деплоя.
+	assetVersion := strconv.FormatInt(time.Now().Unix(), 10)
 	funcMap := template.FuncMap{
 		"formatBytes": formatBytes,
 		"divGB": func(b int64) string {
@@ -87,6 +91,7 @@ func main() {
 			}
 			return fmt.Sprintf("%.1f", gb)
 		},
+		"assetVersion": func() string { return assetVersion },
 	}
 	renderer, err := handlers.NewRenderer(
 		"internal/templates/layouts",
