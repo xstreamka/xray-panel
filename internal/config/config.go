@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 
@@ -124,11 +125,18 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// DSN собирает URL подключения к Postgres. Юзер и пароль прогоняем через
+// url.UserPassword, иначе любой символ, который в URL имеет специальное значение
+// (%, @, :, /, пробел и т.п.), ломает парсер pgx с "invalid URL escape".
 func (c *Config) DSN() string {
-	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		c.DBUser, c.DBPass, c.DBHost, c.DBPort, c.DBName,
-	)
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(c.DBUser, c.DBPass),
+		Host:     fmt.Sprintf("%s:%s", c.DBHost, c.DBPort),
+		Path:     c.DBName,
+		RawQuery: "sslmode=disable",
+	}
+	return u.String()
 }
 
 // SMTPConfigured возвращает true если SMTP настроен

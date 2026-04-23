@@ -247,22 +247,22 @@ func (s *StatsCollector) ResetCumulative(uuid string) {
 func (s *StatsCollector) Run(ctx context.Context) {
 	log.Println("Stats collector started")
 
-	// Быстрый цикл: сбор трафика + enforce (каждую секунду)
-	fastTicker := time.NewTicker(1 * time.Second)
-	defer fastTicker.Stop()
-
-	// Медленный цикл: онлайн-статус и IP (каждые 5 секунд)
-	slowTicker := time.NewTicker(5 * time.Second)
-	defer slowTicker.Stop()
+	// Единый тикер 5 секунд: порядок важен — collectAndEnforce пишет
+	// s.lastTraffic, из которого updateOnlineStatus определяет активных юзеров.
+	// Секундный тик был избыточен: enforcement'у хватает 5 сек (overspend при
+	// 100 Мбит/с ~60 МБ — шум), UI-поллинг фронтенда тоже 3–10 сек, а ценой
+	// была 1 gRPC + N DB-writes каждую секунду. Страховка enforceAll раз в
+	// минуту живёт внутри collectAndEnforce.
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Stats collector stopped")
 			return
-		case <-fastTicker.C:
+		case <-ticker.C:
 			s.collectAndEnforce(ctx)
-		case <-slowTicker.C:
 			s.updateOnlineStatus(ctx)
 		}
 	}
