@@ -8,6 +8,7 @@
         <a href="/dashboard" {{if eq $.Active "dashboard"}}class="active"{{end}}>Мои профили</a>
         <a href="/pay"       {{if eq $.Active "pay"}}class="active"{{end}}>Оплата</a>
         <a href="/settings"  {{if eq $.Active "settings"}}class="active"{{end}}>Настройки</a>
+        <a href="/feedback"  {{if eq $.Active "feedback"}}class="active"{{end}}>Обратная связь</a>
         {{if .IsAdmin}}
         <a href="/admin"         {{if eq $.Active "admin"}}class="active"{{end}}>Пользователи</a>
         <a href="/admin/tariffs" {{if eq $.Active "admin-tariffs"}}class="active"{{end}}>Тарифы</a>

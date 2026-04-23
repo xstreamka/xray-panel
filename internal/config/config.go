@@ -28,6 +28,11 @@ type Config struct {
 	SMTPPassword string
 	SMTPFrom     string
 
+	// FeedbackEmail — получатель писем с формы обратной связи.
+	// Отправка на SMTPFrom (= self) ненадёжна: Gmail/провайдеры часто
+	// отбивают self-loop либо кладут в спам, поэтому выделяем отдельный адрес.
+	FeedbackEmail string
+
 	// Xray
 	XrayAPIAddr    string // gRPC API адрес (127.0.0.1:10085)
 	XrayInboundTag string // тег inbound'а для пользователей
@@ -76,6 +81,8 @@ func Load() (*Config, error) {
 		SMTPUser:     getEnv("SMTP_USER", ""),
 		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
 		SMTPFrom:     getEnv("SMTP_FROM", ""),
+
+		FeedbackEmail: getEnv("FEEDBACK_EMAIL", "xstreamka@gmail.com"),
 
 		XrayAPIAddr:    getEnv("XRAY_API_ADDR", "127.0.0.1:10085"),
 		XrayInboundTag: getEnv("XRAY_INBOUND_TAG", "vless-in"),

@@ -194,6 +194,54 @@ VPN Panel`, username, payURL)
 	return s.send(to, subject, body)
 }
 
+// SendFeedback — письмо от юзера с формы обратной связи на админский ящик.
+// subject уже очищен от CR/LF на стороне хендлера (защита от header injection).
+// Reply-To ставим на email юзера, чтобы можно было ответить прямо из почтовика.
+func (s *Sender) SendFeedback(to, fromUserEmail, fromUsername, userIP, subject, message string) error {
+	fullSubject := "[Feedback] " + subject
+	body := fmt.Sprintf(`Новое сообщение с формы обратной связи.
+
+Пользователь: %s
+Email:        %s
+IP:           %s
+
+Тема: %s
+
+%s
+
+—
+VPN Panel`, fromUsername, fromUserEmail, userIP, subject, message)
+
+	return s.sendWithReplyTo(to, fullSubject, body, fromUserEmail)
+}
+
+// sendWithReplyTo — вариант send с заголовком Reply-To, чтобы ответ админа
+// из почтовика уходил отправителю формы, а не обратно на SMTP_FROM.
+func (s *Sender) sendWithReplyTo(to, subject, body, replyTo string) error {
+	msg := fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nReply-To: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n%s",
+		s.From, to, replyTo, subject, body,
+	)
+
+	addr := net.JoinHostPort(s.Host, s.Port)
+	auth := smtp.PlainAuth("", s.User, s.Password, s.Host)
+
+	var err error
+	if s.Port == "465" {
+		err = s.sendSSL(addr, auth, to, []byte(msg))
+	} else {
+		err = smtp.SendMail(addr, auth, s.User, []string{to}, []byte(msg))
+	}
+
+	if err != nil {
+		log.Printf("Email send error to %s: %v", to, err)
+		return fmt.Errorf("send email: %w", err)
+	}
+
+	log.Printf("Email sent to %s: %s", to, subject)
+	return nil
+}
+
 func (s *Sender) send(to, subject, body string) error {
 	msg := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n%s",

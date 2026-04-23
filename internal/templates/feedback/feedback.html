@@ -1,0 +1,43 @@
+{{template "base" .}}
+
+{{define "title"}}Обратная связь — VPN Panel{{end}}
+
+{{define "content"}}
+<h1 style="margin: 1.5rem 0;">Обратная связь</h1>
+
+<div class="card" style="max-width: 640px;">
+    <p style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 1rem;">
+        Опишите проблему или предложение. Мы ответим на ваш email
+        <strong style="color: #e2e8f0;">{{.User.Email}}</strong>.
+    </p>
+
+    {{if .Success}}
+    <div style="background: #14532d; color: #86efac; padding: 0.6rem 0.8rem; border-radius: 6px; margin-bottom: 1rem;">
+        {{.Success}}
+    </div>
+    {{end}}
+
+    {{if .Error}}
+    <div class="error">{{.Error}}</div>
+    {{end}}
+
+    <form method="POST" action="/feedback">
+        <div style="display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 1rem;">
+            <label style="display: flex; flex-direction: column; gap: 0.3rem; color: #e2e8f0; font-size: 0.9rem;">
+                <span>Тема</span>
+                <input type="text" name="subject" maxlength="200" required
+                       value="{{.Subject}}"
+                       style="padding: 0.5rem 0.7rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 0.95rem;">
+            </label>
+
+            <label style="display: flex; flex-direction: column; gap: 0.3rem; color: #e2e8f0; font-size: 0.9rem;">
+                <span>Сообщение</span>
+                <textarea name="message" rows="8" maxlength="5000" required
+                          style="padding: 0.5rem 0.7rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 0.95rem; resize: vertical;">{{.Message}}</textarea>
+            </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Отправить</button>
+    </form>
+</div>
+{{end}}

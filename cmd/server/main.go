@@ -110,6 +110,10 @@ func main() {
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, inviteStore, xrayHolder, renderer, cfg.BaseURL)
 	settingsHandler := handlers.NewSettingsHandler(userStore, renderer)
+	// Лимит обратной связи: 3 сообщения в час с одного IP — чтобы форму
+	// нельзя было использовать для спам-флуда на админский ящик.
+	feedbackLimiter := middleware.NewRateLimiter(3, time.Hour)
+	feedbackHandler := handlers.NewFeedbackHandler(renderer, mailer, cfg.FeedbackEmail, feedbackLimiter)
 	payHandler := handlers.NewPayHandler(
 		renderer, tariffStore, receiptStore, userStore, mailer, xrayHolder,
 		cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret,
@@ -172,6 +176,10 @@ func main() {
 		// Настройки уведомлений
 		r.Get("/settings", settingsHandler.Index)
 		r.Post("/settings", settingsHandler.Save)
+
+		// Обратная связь
+		r.Get("/feedback", feedbackHandler.Index)
+		r.Post("/feedback", feedbackHandler.Send)
 
 		// Админка
 		r.Group(func(r chi.Router) {
