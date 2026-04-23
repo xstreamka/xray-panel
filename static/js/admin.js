@@ -101,6 +101,26 @@ function refreshStats() {
                     }
 
                     if (traffic) traffic.textContent = '↑' + p.traffic_up_fmt + ' ↓' + p.traffic_down_fmt;
+
+                    // Per-profile прогресс-бар (только на /admin/users/{id}).
+                    const usageText = row.querySelector('[data-stat="profile-usage-text"]');
+                    const barWrap = row.querySelector('[data-stat="profile-bar-wrap"]');
+                    const hasLimit = p.traffic_limit > 0;
+                    if (usageText) usageText.style.display = hasLimit ? '' : 'none';
+                    if (barWrap) barWrap.style.display = hasLimit ? '' : 'none';
+                    if (hasLimit) {
+                        const total = row.querySelector('[data-stat="profile-total"]');
+                        const limit = row.querySelector('[data-stat="profile-limit"]');
+                        const pct = row.querySelector('[data-stat="profile-pct"]');
+                        const bar = row.querySelector('[data-stat="profile-bar"]');
+                        if (total) total.textContent = p.traffic_total_fmt;
+                        if (limit) limit.textContent = p.traffic_limit_fmt;
+                        if (pct) pct.textContent = p.usage_percent;
+                        if (bar) {
+                            bar.style.width = p.usage_percent + '%';
+                            if (p.progress_color) bar.style.background = p.progress_color;
+                        }
+                    }
                 });
             });
         })

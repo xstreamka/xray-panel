@@ -258,14 +258,12 @@
             <td>
                 <div style="display: flex; flex-direction: column; gap: 0.3rem; min-width: 140px;">
                     <span class="stat" data-stat="profile-traffic">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
-                    {{if gt .TrafficLimit 0}}
-                    <div style="font-size: 0.75rem; color: #94a3b8;">
-                        Σ {{formatBytes .TrafficTotal}} / {{formatBytes .TrafficLimit}} · {{.UsagePercent}}%
+                    <div data-stat="profile-usage-text" style="font-size: 0.75rem; color: #94a3b8; {{if le .TrafficLimit 0}}display: none;{{end}}">
+                        Σ <span data-stat="profile-total">{{formatBytes .TrafficTotal}}</span> / <span data-stat="profile-limit">{{formatBytes .TrafficLimit}}</span> · <span data-stat="profile-pct">{{.UsagePercent}}</span>%
                     </div>
-                    <div style="background: #334155; border-radius: 4px; height: 5px; overflow: hidden;">
-                        <div style="background: {{.ProgressColor}}; width: {{.UsagePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+                    <div data-stat="profile-bar-wrap" style="background: #334155; border-radius: 4px; height: 5px; overflow: hidden; {{if le .TrafficLimit 0}}display: none;{{end}}">
+                        <div data-stat="profile-bar" style="background: {{.ProgressColor}}; width: {{.UsagePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
                     </div>
-                    {{end}}
                 </div>
             </td>
             <td>

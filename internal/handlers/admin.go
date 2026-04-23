@@ -591,11 +591,17 @@ func (h *AdminHandler) CancelSubscription(w http.ResponseWriter, r *http.Request
 }
 
 type adminProfileStatsJSON struct {
-	ID          int      `json:"id"`
-	IsOnline    bool     `json:"is_online"`
-	OnlineIPs   []string `json:"online_ips"`
-	TrafficUp   string   `json:"traffic_up_fmt"`
-	TrafficDown string   `json:"traffic_down_fmt"`
+	ID              int      `json:"id"`
+	IsOnline        bool     `json:"is_online"`
+	OnlineIPs       []string `json:"online_ips"`
+	TrafficUp       string   `json:"traffic_up_fmt"`
+	TrafficDown     string   `json:"traffic_down_fmt"`
+	TrafficTotal    int64    `json:"traffic_total"`
+	TrafficLimit    int64    `json:"traffic_limit"`
+	TrafficTotalFmt string   `json:"traffic_total_fmt"`
+	TrafficLimitFmt string   `json:"traffic_limit_fmt"`
+	UsagePercent    int      `json:"usage_percent"`
+	ProgressColor   string   `json:"progress_color"`
 }
 
 type adminUserStatsJSON struct {
@@ -693,12 +699,29 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			if p.IsOnline {
 				uv.OnlineCount++
 			}
+			profTotal := p.TrafficUp + p.TrafficDown
+			profPct := 0
+			profColor := ""
+			if p.TrafficLimit > 0 {
+				used := profTotal
+				if used > p.TrafficLimit {
+					used = p.TrafficLimit
+				}
+				profPct = int(float64(used) / float64(p.TrafficLimit) * 100)
+				profColor = progressColor(profPct)
+			}
 			uv.Profiles = append(uv.Profiles, adminProfileStatsJSON{
-				ID:          p.ID,
-				IsOnline:    p.IsOnline,
-				OnlineIPs:   p.OnlineIPs,
-				TrafficUp:   formatBytesGo(p.TrafficUp),
-				TrafficDown: formatBytesGo(p.TrafficDown),
+				ID:              p.ID,
+				IsOnline:        p.IsOnline,
+				OnlineIPs:       p.OnlineIPs,
+				TrafficUp:       formatBytesGo(p.TrafficUp),
+				TrafficDown:     formatBytesGo(p.TrafficDown),
+				TrafficTotal:    profTotal,
+				TrafficLimit:    p.TrafficLimit,
+				TrafficTotalFmt: formatBytesGo(profTotal),
+				TrafficLimitFmt: formatBytesGo(p.TrafficLimit),
+				UsagePercent:    profPct,
+				ProgressColor:   profColor,
 			})
 		}
 		uv.Total = formatBytesGo(totalTraffic)
