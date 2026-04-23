@@ -32,16 +32,24 @@ type User struct {
 	VerifyExpires *time.Time `json:"-"`
 
 	// ===== Подписочная модель =====
-	CurrentTariffID     *int       `json:"current_tariff_id"`
-	TariffExpiresAt     *time.Time `json:"tariff_expires_at"`
-	BaseTrafficLimit    int64      `json:"base_traffic_limit"`
-	BaseTrafficUsed     int64      `json:"base_traffic_used"`
-	ExtraTrafficBalance int64      `json:"extra_traffic_balance"`
-	ExtraTrafficGranted int64      `json:"extra_traffic_granted"`
-	FrozenExtraBalance  int64      `json:"frozen_extra_balance"`
-	Reminder5dSentAt    *time.Time `json:"-"`
-	Reminder1dSentAt    *time.Time `json:"-"`
-	BlockNotifiedAt     *time.Time `json:"-"`
+	CurrentTariffID      *int       `json:"current_tariff_id"`
+	TariffExpiresAt      *time.Time `json:"tariff_expires_at"`
+	BaseTrafficLimit     int64      `json:"base_traffic_limit"`
+	BaseTrafficUsed      int64      `json:"base_traffic_used"`
+	ExtraTrafficBalance  int64      `json:"extra_traffic_balance"`
+	ExtraTrafficGranted  int64      `json:"extra_traffic_granted"`
+	FrozenExtraBalance   int64      `json:"frozen_extra_balance"`
+	Reminder5dSentAt     *time.Time `json:"-"`
+	Reminder1dSentAt     *time.Time `json:"-"`
+	BlockNotifiedAt      *time.Time `json:"-"`
+	TrafficLowNotifiedAt *time.Time `json:"-"`
+
+	// Предпочтения уведомлений. Системные (верификация, ресет пароля) не
+	// регулируются. Флаги проверяются на каждой точке отправки.
+	NotifyTopup      bool `json:"notify_topup"`
+	NotifyExpiration bool `json:"notify_expiration"`
+	NotifyBlock      bool `json:"notify_block"`
+	NotifyTrafficLow bool `json:"notify_traffic_low"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -76,6 +84,8 @@ const userCols = `id, username, email, is_admin, is_active, email_verified,
                   base_traffic_limit, base_traffic_used,
                   extra_traffic_balance, extra_traffic_granted, frozen_extra_balance,
                   reminder_5d_sent_at, reminder_1d_sent_at, block_notified_at,
+                  traffic_low_notified_at,
+                  notify_topup, notify_expiration, notify_block, notify_traffic_low,
                   created_at, updated_at`
 
 func scanUser(row interface {
@@ -87,6 +97,8 @@ func scanUser(row interface {
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
 		&u.ExtraTrafficBalance, &u.ExtraTrafficGranted, &u.FrozenExtraBalance,
 		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
+		&u.TrafficLowNotifiedAt,
+		&u.NotifyTopup, &u.NotifyExpiration, &u.NotifyBlock, &u.NotifyTrafficLow,
 		&u.CreatedAt, &u.UpdatedAt,
 	)
 }
@@ -138,6 +150,8 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 		&u.BaseTrafficLimit, &u.BaseTrafficUsed,
 		&u.ExtraTrafficBalance, &u.ExtraTrafficGranted, &u.FrozenExtraBalance,
 		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
+		&u.TrafficLowNotifiedAt,
+		&u.NotifyTopup, &u.NotifyExpiration, &u.NotifyBlock, &u.NotifyTrafficLow,
 		&u.CreatedAt, &u.UpdatedAt,
 		&u.PasswordHash,
 	)
@@ -334,6 +348,7 @@ func (s *UserStore) RenewSubscription(
 		    reminder_5d_sent_at   = NULL,
 		    reminder_1d_sent_at   = NULL,
 		    block_notified_at     = NULL,
+		    traffic_low_notified_at = NULL,
 		    updated_at = NOW()
 		 WHERE id = $4
 		 RETURNING `+userCols,
@@ -354,9 +369,10 @@ func (s *UserStore) AddExtra(ctx context.Context, userID int, bytes int64) error
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users
-		 SET extra_traffic_balance = extra_traffic_balance + $1,
-		     extra_traffic_granted = extra_traffic_granted + $1,
-		     block_notified_at     = NULL,
+		 SET extra_traffic_balance   = extra_traffic_balance + $1,
+		     extra_traffic_granted   = extra_traffic_granted + $1,
+		     block_notified_at       = NULL,
+		     traffic_low_notified_at = NULL,
 		     updated_at = NOW()
 		 WHERE id = $2`,
 		bytes, userID,
@@ -380,9 +396,10 @@ func (s *UserStore) SetExtra(ctx context.Context, userID int, bytes int64) error
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users
-		 SET extra_traffic_balance = $1::bigint,
-		     extra_traffic_granted = $1::bigint,
-		     block_notified_at     = CASE WHEN $1::bigint > 0 THEN NULL ELSE block_notified_at END,
+		 SET extra_traffic_balance   = $1::bigint,
+		     extra_traffic_granted   = $1::bigint,
+		     block_notified_at       = CASE WHEN $1::bigint > 0 THEN NULL ELSE block_notified_at END,
+		     traffic_low_notified_at = CASE WHEN $1::bigint > 0 THEN NULL ELSE traffic_low_notified_at END,
 		     updated_at = NOW()
 		 WHERE id = $2`,
 		bytes, userID,
@@ -404,6 +421,46 @@ func (s *UserStore) TryMarkBlockNotified(ctx context.Context, userID int) (bool,
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users SET block_notified_at = NOW(), updated_at = NOW()
 		 WHERE id = $1 AND block_notified_at IS NULL`,
+		userID,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// UpdateNotificationPrefs сохраняет юзерские галочки по типам писем.
+// Системные письма (верификация, ресет пароля) здесь не регулируются —
+// для них флагов нет, они всегда отправляются.
+func (s *UserStore) UpdateNotificationPrefs(ctx context.Context, userID int,
+	topup, expiration, block, trafficLow bool,
+) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users
+		 SET notify_topup        = $1,
+		     notify_expiration   = $2,
+		     notify_block        = $3,
+		     notify_traffic_low  = $4,
+		     updated_at          = NOW()
+		 WHERE id = $5`,
+		topup, expiration, block, trafficLow, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
+}
+
+// TryMarkTrafficLowNotified — аналог для «скоро закончится трафик» письма.
+// Возвращает true, если пометка поставлена впервые (нужно слать письмо),
+// false — если уже стоит. Сбрасывается при пополнении баланса.
+func (s *UserStore) TryMarkTrafficLowNotified(ctx context.Context, userID int) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET traffic_low_notified_at = NOW(), updated_at = NOW()
+		 WHERE id = $1 AND traffic_low_notified_at IS NULL`,
 		userID,
 	)
 	if err != nil {

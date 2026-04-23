@@ -351,6 +351,11 @@ func (h *PayHandler) sendPaymentEmail(
 		return
 	}
 
+	if !u.NotifyTopup {
+		log.Printf("Payment mail: skipped for user %d (notify_topup=off)", userID)
+		return
+	}
+
 	// TODO(шаг 6 / email): заменить на отдельные SendSubscriptionNotification /
 	// SendAddonNotification с разными текстами письма. Пока используем старый
 	// шаблон — он корректно расскажет про начисленные ГБ и сумму, но не

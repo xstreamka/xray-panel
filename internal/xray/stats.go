@@ -101,8 +101,49 @@ func (s *StatsCollector) notifyBlock(userID int, reason string) {
 			log.Printf("Notify block: get user %d: %v", userID, err)
 			return
 		}
+		if !u.NotifyBlock {
+			return
+		}
 		if err := s.mailer.SendBlockNotification(u.Email, u.Username, reason, s.baseURL); err != nil {
 			log.Printf("Notify block email user=%d: %v", userID, err)
+		}
+	}()
+}
+
+// trafficLowThreshold — порог «скоро закончится», при котором шлём
+// предупредительное письмо. Один раз, пока юзер не пополнит баланс.
+const trafficLowThreshold int64 = 1 * 1024 * 1024 * 1024 // 1 GiB
+
+// notifyTrafficLow асинхронно шлёт юзеру письмо «скоро закончится трафик».
+// Вызывается после DeductTraffic, когда remaining в пороге (0, trafficLowThreshold].
+// Идемпотентно через traffic_low_notified_at — при пополнении флаг сбрасывается.
+func (s *StatsCollector) notifyTrafficLow(userID int, remaining int64) {
+	if s.mailer == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		first, err := s.users.TryMarkTrafficLowNotified(ctx, userID)
+		if err != nil {
+			log.Printf("Notify low: mark user %d: %v", userID, err)
+			return
+		}
+		if !first {
+			return
+		}
+
+		u, err := s.users.GetByID(ctx, userID)
+		if err != nil {
+			log.Printf("Notify low: get user %d: %v", userID, err)
+			return
+		}
+		if !u.NotifyTrafficLow {
+			return
+		}
+		if err := s.mailer.SendTrafficLowNotification(u.Email, u.Username, remaining, s.baseURL); err != nil {
+			log.Printf("Notify low email user=%d: %v", userID, err)
 		}
 	}()
 }
@@ -317,6 +358,9 @@ func (s *StatsCollector) collectAndEnforce(ctx context.Context) {
 			s.disabledUsers[uid] = true
 			s.disabledUsersMu.Unlock()
 			s.notifyBlock(uid, "balance")
+		} else if remaining <= trafficLowThreshold {
+			// Порог «скоро закончится» — одно письмо на цикл подписки.
+			s.notifyTrafficLow(uid, remaining)
 		}
 	}
 

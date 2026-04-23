@@ -116,6 +116,10 @@ func (w *Worker) notifyBlock(ctx context.Context, userID int) {
 		log.Printf("Subscription: notify block user=%d: %v", userID, err)
 		return
 	}
+	if !u.NotifyBlock {
+		log.Printf("Subscription: block mail skipped for user %d (notify_block=off)", userID)
+		return
+	}
 	go func(to, username string) {
 		if err := w.mailer.SendBlockNotification(to, username, "expired", w.baseURL); err != nil {
 			log.Printf("Subscription: block email user=%d: %v", userID, err)
@@ -137,6 +141,14 @@ func (w *Worker) runReminders(ctx context.Context) {
 		}
 		for _, u := range list {
 			if u.TariffExpiresAt == nil {
+				continue
+			}
+			// Юзер отключил этот тип писем: пометим как «отправлено», чтобы
+			// повторный тик не перебирал его заново — письма всё равно не будет.
+			if !u.NotifyExpiration {
+				if err := w.users.MarkReminderSent(ctx, u.ID, days); err != nil {
+					log.Printf("Subscription: MarkReminderSent(skip) user=%d days=%d: %v", u.ID, days, err)
+				}
 				continue
 			}
 			if err := w.mailer.SendExpirationReminder(u.Email, u.Username, days, *u.TariffExpiresAt, w.baseURL); err != nil {

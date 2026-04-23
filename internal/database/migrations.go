@@ -156,6 +156,20 @@ END $$`,
 	// (AddExtra/SetExtra/RenewSubscription/ApplyPayment), чтобы не спамить.
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS block_notified_at TIMESTAMPTZ`,
 
+	// Метка «юзеру уже отправили письмо о малом остатке трафика» (≤ 1 ГБ).
+	// Сбрасывается при пополнении баланса — логика такая же, как у block_notified_at,
+	// чтобы при следующем исчерпании цикла письмо ушло заново.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS traffic_low_notified_at TIMESTAMPTZ`,
+
+	// Настройки уведомлений на почту — каждый тип письма включается отдельно.
+	// Системные письма (подтверждение email, восстановление пароля) не
+	// регулируются — без них юзер не сможет пройти соответствующие сценарии.
+	// По умолчанию всё включено, чтобы поведение совпадало с до-миграционным.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_topup BOOLEAN NOT NULL DEFAULT TRUE`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_expiration BOOLEAN NOT NULL DEFAULT TRUE`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_block BOOLEAN NOT NULL DEFAULT TRUE`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_traffic_low BOOLEAN NOT NULL DEFAULT TRUE`,
+
 	// Снос legacy-колонки: данные уже перенесены в extra_traffic_balance
 	// более ранней миграцией (на существующих БД). На чистых БД — no-op.
 	`ALTER TABLE users DROP COLUMN IF EXISTS traffic_balance`,

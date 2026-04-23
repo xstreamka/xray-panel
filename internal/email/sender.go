@@ -122,6 +122,41 @@ VPN Panel`, username, when, expiresAt.Format("02.01.2006 15:04"), payURL)
 	return s.send(to, subject, body)
 }
 
+// SendTrafficLowNotification — предупреждение «скоро закончится трафик».
+// remainingBytes — сколько осталось на сумме base+extra; отправляется один раз,
+// пока юзер не пополнит баланс (флаг сбросит), чтобы не спамить каждым тиком.
+func (s *Sender) SendTrafficLowNotification(to, username string, remainingBytes int64, baseURL string) error {
+	payURL := strings.TrimRight(baseURL, "/") + "/pay"
+	subject := "Скоро закончится трафик — VPN Panel"
+	body := fmt.Sprintf(`Привет, %s!
+
+У вас осталось %s доступного трафика. Когда баланс обнулится, все VPN-профили
+будут отключены автоматически.
+
+Чтобы не потерять доступ — докупите трафик или оформите новую подписку:
+%s
+
+—
+VPN Panel`, username, formatBytes(remainingBytes), payURL)
+
+	return s.send(to, subject, body)
+}
+
+// formatBytes — компактный перевод байт в KB/MB/GB. Дублируем локально,
+// чтобы не тянуть в пакет email зависимость от handlers/.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.2f %s", float64(b)/float64(div), []string{"KB", "MB", "GB", "TB"}[exp])
+}
+
 // SendBlockNotification — уведомление об отключении VPN-профилей.
 // reason: "balance" (исчерпан трафик) или "expired" (истёк срок подписки).
 func (s *Sender) SendBlockNotification(to, username, reason, baseURL string) error {

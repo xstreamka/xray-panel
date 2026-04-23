@@ -103,6 +103,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL, resetLimiter)
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, xrayHolder, cfg, renderer)
 	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, xrayHolder, renderer)
+	settingsHandler := handlers.NewSettingsHandler(userStore, renderer)
 	payHandler := handlers.NewPayHandler(
 		renderer, tariffStore, receiptStore, userStore, mailer, xrayHolder,
 		cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret,
@@ -162,6 +163,10 @@ func main() {
 		r.Post("/pay/checkout", payHandler.Checkout)
 		r.Get("/pay/history", payHandler.History)
 
+		// Настройки уведомлений
+		r.Get("/settings", settingsHandler.Index)
+		r.Post("/settings", settingsHandler.Save)
+
 		// Админка
 		r.Group(func(r chi.Router) {
 			r.Use(authMW.RequireAdmin)
@@ -214,7 +219,7 @@ func connectXray(
 	mailer *email.Sender,
 	baseURL string,
 ) {
-	firewall := xray.NewFirewall()
+	firewall := xray.NewFirewall(cfg.ServerPort)
 	firewall.Init()
 	holder.SetFirewall(firewall)
 

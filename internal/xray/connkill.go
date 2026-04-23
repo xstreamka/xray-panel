@@ -15,10 +15,14 @@ import (
 //   - ss -K мгновенно убивает существующие соединения (TCP RST)
 //   - НЕ создаёт постоянных правил → не блокирует доступ к веб-панели/лендингу
 //   - Новые VPN-подключения не пройдут: RemoveUser удаляет UUID из Xray
-type Firewall struct{}
+type Firewall struct {
+	port string // порт, на котором слушает Xray inbound (обычно 443; для локальной разработки может быть другой)
+}
 
-func NewFirewall() *Firewall {
-	return &Firewall{}
+// NewFirewall — port должен совпадать с inbound-портом Xray (cfg.ServerPort).
+// Иначе ss -K не найдёт соединения: он фильтрует по sport = local-порт Xray.
+func NewFirewall(port string) *Firewall {
+	return &Firewall{port: port}
 }
 
 // Init очищает legacy iptables chain VPN_BLOCK, если она осталась от старой версии.
@@ -31,11 +35,11 @@ func (f *Firewall) Init() {
 	log.Println("Firewall: initialized (ss -K mode, iptables rules removed)")
 }
 
-// BlockUser убивает все активные TCP-соединения пользователя на порту 443.
+// BlockUser убивает все активные TCP-соединения пользователя на Xray-порту.
 //
 // ВАЖНО: фильтр ss -K использует терминологию local/remote:
 //   - dst  = remote peer address (IP юзера)
-//   - sport = local port (443 — порт Xray)
+//   - sport = local port (порт Xray inbound)
 //
 // RemoveUser вызывается ДО BlockUser и гарантирует, что реконнект не пройдёт.
 func (f *Firewall) BlockUser(ctx context.Context, client *Client, uuid string) int {
@@ -54,8 +58,8 @@ func (f *Firewall) BlockUser(ctx context.Context, client *Client, uuid string) i
 
 	killed := 0
 	for ip := range ips {
-		// dst = remote address (юзер), sport = local port (Xray слушает на 443)
-		err := exec.Command("ss", "-K", "dst", ip, "sport", "=", "443").Run()
+		// dst = remote address (юзер), sport = local port (Xray inbound)
+		err := exec.Command("ss", "-K", "dst", ip, "sport", "=", f.port).Run()
 		if err != nil {
 			log.Printf("Firewall: ss -K failed for %s: %v", ip, err)
 			continue
