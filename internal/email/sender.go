@@ -73,6 +73,7 @@ VPN Panel`, resetURL)
 // SendTopupNotification — уведомление о зачислении баланса после оплаты.
 func (s *Sender) SendTopupNotification(to, username string, trafficGB, amountRub float64, invID int, baseURL string) error {
 	dashURL := strings.TrimRight(baseURL, "/") + "/dashboard"
+	settingsURL := strings.TrimRight(baseURL, "/") + "/settings"
 
 	subject := fmt.Sprintf("Баланс пополнен на %.1f ГБ — VPN Panel", trafficGB)
 	body := fmt.Sprintf(`Привет, %s!
@@ -88,8 +89,11 @@ func (s *Sender) SendTopupNotification(to, username string, trafficGB, amountRub
 
 Если оплату совершали не вы — ответьте на это письмо.
 
+Отключить такие уведомления можно в настройках:
+%s
+
 —
-VPN Panel`, username, invID, amountRub, trafficGB, dashURL)
+VPN Panel`, username, invID, amountRub, trafficGB, dashURL, settingsURL)
 
 	return s.send(to, subject, body)
 }
@@ -98,6 +102,7 @@ VPN Panel`, username, invID, amountRub, trafficGB, dashURL)
 // daysLeft — за сколько дней шлём (5 или 1), expiresAt — точная дата окончания.
 func (s *Sender) SendExpirationReminder(to, username string, daysLeft int, expiresAt time.Time, baseURL string) error {
 	payURL := strings.TrimRight(baseURL, "/") + "/pay"
+	settingsURL := strings.TrimRight(baseURL, "/") + "/settings"
 
 	var subject, when string
 	switch daysLeft {
@@ -116,8 +121,11 @@ func (s *Sender) SendExpirationReminder(to, username string, daysLeft int, expir
 Чтобы не потерять доступ к VPN, продлите подписку заранее:
 %s
 
+Отключить такие уведомления можно в настройках:
+%s
+
 —
-VPN Panel`, username, when, expiresAt.Format("02.01.2006 15:04"), payURL)
+VPN Panel`, username, when, expiresAt.Format("02.01.2006 15:04"), payURL, settingsURL)
 
 	return s.send(to, subject, body)
 }
@@ -127,6 +135,7 @@ VPN Panel`, username, when, expiresAt.Format("02.01.2006 15:04"), payURL)
 // пока юзер не пополнит баланс (флаг сбросит), чтобы не спамить каждым тиком.
 func (s *Sender) SendTrafficLowNotification(to, username string, remainingBytes int64, baseURL string) error {
 	payURL := strings.TrimRight(baseURL, "/") + "/pay"
+	settingsURL := strings.TrimRight(baseURL, "/") + "/settings"
 	subject := "Скоро закончится трафик — VPN Panel"
 	body := fmt.Sprintf(`Привет, %s!
 
@@ -136,8 +145,11 @@ func (s *Sender) SendTrafficLowNotification(to, username string, remainingBytes 
 Чтобы не потерять доступ — докупите трафик или оформите новую подписку:
 %s
 
+Отключить такие уведомления можно в настройках:
+%s
+
 —
-VPN Panel`, username, formatBytes(remainingBytes), payURL)
+VPN Panel`, username, formatBytes(remainingBytes), payURL, settingsURL)
 
 	return s.send(to, subject, body)
 }
@@ -161,6 +173,7 @@ func formatBytes(b int64) string {
 // reason: "balance" (исчерпан трафик) или "expired" (истёк срок подписки).
 func (s *Sender) SendBlockNotification(to, username, reason, baseURL string) error {
 	payURL := strings.TrimRight(baseURL, "/") + "/pay"
+	settingsURL := strings.TrimRight(baseURL, "/") + "/settings"
 
 	var subject, body string
 	switch reason {
@@ -175,8 +188,11 @@ func (s *Sender) SendBlockNotification(to, username, reason, baseURL string) err
 Чтобы восстановить доступ — оформите подписку заново:
 %s
 
+Отключить такие уведомления можно в настройках:
+%s
+
 —
-VPN Panel`, username, payURL)
+VPN Panel`, username, payURL, settingsURL)
 
 	default: // "balance"
 		subject = "Трафик закончился — VPN отключён"
@@ -187,8 +203,11 @@ VPN Panel`, username, payURL)
 Чтобы восстановить доступ — докупите трафик или оформите новый тариф:
 %s
 
+Отключить такие уведомления можно в настройках:
+%s
+
 —
-VPN Panel`, username, payURL)
+VPN Panel`, username, payURL, settingsURL)
 	}
 
 	return s.send(to, subject, body)
