@@ -20,13 +20,14 @@ import (
 )
 
 type AdminHandler struct {
-	users      *models.UserStore
-	profiles   *models.VPNProfileStore
-	tariffs    *models.TariffStore
-	invites    *models.InviteStore
-	xrayHolder *xray.Holder
-	renderer   *Renderer
-	baseURL    string
+	users       *models.UserStore
+	profiles    *models.VPNProfileStore
+	tariffs     *models.TariffStore
+	invites     *models.InviteStore
+	trafficLogs *models.TrafficLogStore
+	xrayHolder  *xray.Holder
+	renderer    *Renderer
+	baseURL     string
 }
 
 func NewAdminHandler(
@@ -34,13 +35,15 @@ func NewAdminHandler(
 	profiles *models.VPNProfileStore,
 	tariffs *models.TariffStore,
 	invites *models.InviteStore,
+	trafficLogs *models.TrafficLogStore,
 	xrayHolder *xray.Holder,
 	renderer *Renderer,
 	baseURL string,
 ) *AdminHandler {
 	return &AdminHandler{
 		users: users, profiles: profiles, tariffs: tariffs, invites: invites,
-		xrayHolder: xrayHolder, renderer: renderer, baseURL: baseURL,
+		trafficLogs: trafficLogs,
+		xrayHolder:  xrayHolder, renderer: renderer, baseURL: baseURL,
 	}
 }
 
@@ -738,6 +741,42 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// UserTrafficChart — GET /admin/users/{id}/traffic?range=24h|7d|30d|90d.
+// Агрегированные точки трафика конкретного юзера (сумма по всем его профилям).
+// Используется админ-карточкой пользователя, поэтому без ownership-фильтра —
+// admin middleware уже проверил права.
+func (h *AdminHandler) UserTrafficChart(w http.ResponseWriter, r *http.Request) {
+	userID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	from, bucket, ok := resolveTrafficRange(r.URL.Query().Get("range"))
+	if !ok {
+		http.Error(w, "invalid range", http.StatusBadRequest)
+		return
+	}
+
+	points, err := h.trafficLogs.AggregateByUser(r.Context(), userID, from, bucket)
+	if err != nil {
+		log.Printf("Admin UserTrafficChart: aggregate user=%d: %v", userID, err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if points == nil {
+		points = []models.TrafficPoint{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"range":  r.URL.Query().Get("range"),
+		"bucket": bucket,
+		"points": points,
+	})
 }
 
 // ──────────────────────────────────────────────

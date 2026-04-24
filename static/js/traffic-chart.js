@@ -8,6 +8,10 @@
     const rangeBox = document.getElementById('traffic-range');
     if (!canvas || !rangeBox || typeof Chart === 'undefined') return;
 
+    // URL источника данных можно переопределить через data-traffic-url —
+    // админка отдаёт график по конкретному user_id, дашборд — по текущей сессии.
+    const trafficURL = canvas.dataset.trafficUrl || '/dashboard/traffic';
+
     let chart = null;
     let currentRange = '24h';
 
@@ -154,7 +158,7 @@
             b.style.color = active ? '' : '#e2e8f0';
         });
 
-        fetch('/dashboard/traffic?range=' + encodeURIComponent(range))
+        fetch(trafficURL + '?range=' + encodeURIComponent(range))
             .then((r) => r.ok ? r.json() : Promise.reject(r.status))
             .then(render)
             .catch((err) => console.error('traffic chart load:', err));

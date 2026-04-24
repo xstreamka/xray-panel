@@ -109,7 +109,7 @@ func main() {
 	resetLimiter := middleware.NewRateLimiter(handlers.ResetLimitMax, time.Hour)
 	authHandler := handlers.NewAuthHandler(userStore, inviteStore, authMW, renderer, mailer, cfg.BaseURL, resetLimiter)
 	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, trafficLogStore, xrayHolder, cfg, renderer)
-	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, inviteStore, xrayHolder, renderer, cfg.BaseURL)
+	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, inviteStore, trafficLogStore, xrayHolder, renderer, cfg.BaseURL)
 	settingsHandler := handlers.NewSettingsHandler(userStore, renderer)
 	// Лимит обратной связи: 3 сообщения в час с одного IP — чтобы форму
 	// нельзя было использовать для спам-флуда на админский ящик.
@@ -190,6 +190,7 @@ func main() {
 			r.Get("/admin", adminHandler.Users)
 			r.Get("/admin/stats", adminHandler.StatsJSON)
 			r.Get("/admin/users/{id}", adminHandler.UserView)
+			r.Get("/admin/users/{id}/traffic", adminHandler.UserTrafficChart)
 			r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
 			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
 			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
