@@ -21,12 +21,17 @@ const userContextKey contextKey = "user"
 const maxSessionAge = 30 * 24 * time.Hour // 30 дней
 
 type AuthMiddleware struct {
-	userStore *models.UserStore
-	secretKey string
+	userStore    *models.UserStore
+	secretKey    string
+	secureCookie bool
 }
 
-func NewAuthMiddleware(userStore *models.UserStore, secretKey string) *AuthMiddleware {
-	return &AuthMiddleware{userStore: userStore, secretKey: secretKey}
+func NewAuthMiddleware(userStore *models.UserStore, secretKey, baseURL string) *AuthMiddleware {
+	return &AuthMiddleware{
+		userStore:    userStore,
+		secretKey:    secretKey,
+		secureCookie: strings.HasPrefix(strings.ToLower(baseURL), "https://"),
+	}
 }
 
 // RequireAuth — middleware для защищённых роутов (без проверки email)
@@ -87,7 +92,7 @@ func (m *AuthMiddleware) SetSession(w http.ResponseWriter, userID int) {
 		Value:    value + "|" + sig,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   m.secureCookie,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400 * 30,
 	}
@@ -96,10 +101,13 @@ func (m *AuthMiddleware) SetSession(w http.ResponseWriter, userID int) {
 
 func (m *AuthMiddleware) ClearSession(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name:   "session",
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
+		Name:     "session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   m.secureCookie,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
 	})
 }
 

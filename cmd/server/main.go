@@ -103,7 +103,7 @@ func main() {
 		log.Fatalf("Template error: %v", err)
 	}
 
-	authMW := middleware.NewAuthMiddleware(userStore, cfg.SecretKey)
+	authMW := middleware.NewAuthMiddleware(userStore, cfg.SecretKey, cfg.BaseURL)
 	// Лимит на запросы восстановления пароля: 3 в час с одного IP.
 	// Значение продублировано константой handlers.ResetLimitMax для UI-сноски.
 	resetLimiter := middleware.NewRateLimiter(handlers.ResetLimitMax, time.Hour)
