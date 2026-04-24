@@ -200,6 +200,7 @@ VPN Panel`, username, payURL)
 // Остальные профили продолжают работать, общая подписка жива.
 func (s *Sender) SendProfileLimitNotification(to, username, profileName string, limitBytes int64, baseURL string) error {
 	dashURL := strings.TrimRight(baseURL, "/") + "/dashboard"
+	settingsURL := strings.TrimRight(baseURL, "/") + "/settings"
 	subject := fmt.Sprintf("Лимит профиля «%s» исчерпан — VPN Panel", profileName)
 	body := fmt.Sprintf(`Привет, %s!
 
@@ -210,10 +211,11 @@ func (s *Sender) SendProfileLimitNotification(to, username, profileName string, 
 в дашборде:
 %s
 
-Отключить такие уведомления можно в /settings.
+Отключить такие уведомления можно в настройках:
+%s
 
 —
-VPN Panel`, username, profileName, formatBytes(limitBytes), dashURL)
+VPN Panel`, username, profileName, formatBytes(limitBytes), dashURL, settingsURL)
 
 	return s.send(to, subject, body)
 }
