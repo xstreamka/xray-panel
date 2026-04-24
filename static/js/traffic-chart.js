@@ -132,6 +132,18 @@
         });
     }
 
+    // Тихое автообновление активно только для 24h: на длинных диапазонах
+    // (7d/30d/90d) бакеты часовые/дневные — перезапрашивать раз в 5 минут
+    // бессмысленно и лишний раз дёргает БД.
+    let autoRefreshTimer = null;
+    function scheduleAutoRefresh() {
+        if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+        if (currentRange !== '24h') return;
+        autoRefreshTimer = setInterval(() => {
+            if (currentRange === '24h' && !document.hidden) load(currentRange);
+        }, 5 * 60 * 1000);
+    }
+
     function load(range) {
         currentRange = range;
         // Подсветка активной кнопки.
@@ -152,7 +164,9 @@
         const btn = e.target.closest('button[data-range]');
         if (!btn) return;
         load(btn.dataset.range);
+        scheduleAutoRefresh();
     });
 
     load(currentRange);
+    scheduleAutoRefresh();
 })();
