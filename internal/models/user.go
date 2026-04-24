@@ -46,10 +46,11 @@ type User struct {
 
 	// Предпочтения уведомлений. Системные (верификация, ресет пароля) не
 	// регулируются. Флаги проверяются на каждой точке отправки.
-	NotifyTopup      bool `json:"notify_topup"`
-	NotifyExpiration bool `json:"notify_expiration"`
-	NotifyBlock      bool `json:"notify_block"`
-	NotifyTrafficLow bool `json:"notify_traffic_low"`
+	NotifyTopup        bool `json:"notify_topup"`
+	NotifyExpiration   bool `json:"notify_expiration"`
+	NotifyBlock        bool `json:"notify_block"`
+	NotifyTrafficLow   bool `json:"notify_traffic_low"`
+	NotifyProfileLimit bool `json:"notify_profile_limit"`
 
 	// Инвайт, по которому юзер зарегистрировался. NULL для юзеров, пришедших
 	// через открытую регистрацию. Нужно админке, чтобы вывести бейдж и
@@ -91,6 +92,7 @@ const userCols = `id, username, email, is_admin, is_active, email_verified,
                   reminder_5d_sent_at, reminder_1d_sent_at, block_notified_at,
                   traffic_low_notified_at,
                   notify_topup, notify_expiration, notify_block, notify_traffic_low,
+                  notify_profile_limit,
                   invite_id,
                   created_at, updated_at`
 
@@ -105,6 +107,7 @@ func scanUser(row interface {
 		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
 		&u.TrafficLowNotifiedAt,
 		&u.NotifyTopup, &u.NotifyExpiration, &u.NotifyBlock, &u.NotifyTrafficLow,
+		&u.NotifyProfileLimit,
 		&u.InviteID,
 		&u.CreatedAt, &u.UpdatedAt,
 	)
@@ -163,6 +166,7 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 		&u.Reminder5dSentAt, &u.Reminder1dSentAt, &u.BlockNotifiedAt,
 		&u.TrafficLowNotifiedAt,
 		&u.NotifyTopup, &u.NotifyExpiration, &u.NotifyBlock, &u.NotifyTrafficLow,
+		&u.NotifyProfileLimit,
 		&u.InviteID,
 		&u.CreatedAt, &u.UpdatedAt,
 		&u.PasswordHash,
@@ -445,17 +449,18 @@ func (s *UserStore) TryMarkBlockNotified(ctx context.Context, userID int) (bool,
 // Системные письма (верификация, ресет пароля) здесь не регулируются —
 // для них флагов нет, они всегда отправляются.
 func (s *UserStore) UpdateNotificationPrefs(ctx context.Context, userID int,
-	topup, expiration, block, trafficLow bool,
+	topup, expiration, block, trafficLow, profileLimit bool,
 ) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users
-		 SET notify_topup        = $1,
-		     notify_expiration   = $2,
-		     notify_block        = $3,
-		     notify_traffic_low  = $4,
-		     updated_at          = NOW()
-		 WHERE id = $5`,
-		topup, expiration, block, trafficLow, userID,
+		 SET notify_topup         = $1,
+		     notify_expiration    = $2,
+		     notify_block         = $3,
+		     notify_traffic_low   = $4,
+		     notify_profile_limit = $5,
+		     updated_at           = NOW()
+		 WHERE id = $6`,
+		topup, expiration, block, trafficLow, profileLimit, userID,
 	)
 	if err != nil {
 		return err

@@ -35,9 +35,10 @@ func (h *SettingsHandler) Save(w http.ResponseWriter, r *http.Request) {
 	expiration := r.FormValue("notify_expiration") == "on"
 	block := r.FormValue("notify_block") == "on"
 	trafficLow := r.FormValue("notify_traffic_low") == "on"
+	profileLimit := r.FormValue("notify_profile_limit") == "on"
 
 	if err := h.users.UpdateNotificationPrefs(r.Context(), user.ID,
-		topup, expiration, block, trafficLow); err != nil {
+		topup, expiration, block, trafficLow, profileLimit); err != nil {
 		log.Printf("Settings: update prefs user=%d: %v", user.ID, err)
 		http.Error(w, "Не удалось сохранить настройки", http.StatusInternalServerError)
 		return

@@ -172,6 +172,18 @@ END $$`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_expiration BOOLEAN NOT NULL DEFAULT TRUE`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_block BOOLEAN NOT NULL DEFAULT TRUE`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_traffic_low BOOLEAN NOT NULL DEFAULT TRUE`,
+	// Флаг на отключение письма «исчерпан personal-лимит профиля». Отдельный
+	// от notify_block, т.к. это другое событие: выключается один конкретный
+	// профиль по пользовательскому лимиту, а не вся учётка.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_profile_limit BOOLEAN NOT NULL DEFAULT TRUE`,
+
+	// Метка «юзеру уже отправили письмо об исчерпании personal-лимита этого
+	// профиля». Живёт на vpn_profiles, а не на users: лимиты индивидуальны,
+	// спамить по каждому профилю отдельно — это нормально. Сбрасывается при
+	// смене лимита (SetLimit), сбросе счётчика (ResetTraffic) или ручной
+	// активации (SetActive TRUE / ReactivateAllByUser), чтобы следующий цикл
+	// снова мог отправить уведомление.
+	`ALTER TABLE vpn_profiles ADD COLUMN IF NOT EXISTS limit_notified_at TIMESTAMPTZ`,
 
 	// Снос legacy-колонки: данные уже перенесены в extra_traffic_balance
 	// более ранней миграцией (на существующих БД). На чистых БД — no-op.

@@ -60,6 +60,17 @@
                     </div>
                 </span>
             </label>
+
+            <label style="display: flex; gap: 0.6rem; align-items: flex-start; margin: 0; color: #e2e8f0; font-size: 0.95rem; cursor: pointer;">
+                <input type="checkbox" name="notify_profile_limit" {{if .User.NotifyProfileLimit}}checked{{end}} style="margin-top: 0.25rem;">
+                <span>
+                    <strong>Лимит профиля исчерпан</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.15rem;">
+                        Уведомление, когда один из ваших профилей достиг установленного вами
+                        личного лимита и был отключён. Остальные профили и подписка продолжают работать.
+                    </div>
+                </span>
+            </label>
         </div>
 
         <button type="submit" class="btn btn-primary">Сохранить</button>

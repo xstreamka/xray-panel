@@ -194,6 +194,30 @@ VPN Panel`, username, payURL)
 	return s.send(to, subject, body)
 }
 
+// SendProfileLimitNotification — письмо «исчерпан personal-лимит профиля».
+// Отличается от SendBlockNotification тем, что отключается один конкретный
+// профиль (по лимиту, который юзер сам на него выставил), а не вся учётка.
+// Остальные профили продолжают работать, общая подписка жива.
+func (s *Sender) SendProfileLimitNotification(to, username, profileName string, limitBytes int64, baseURL string) error {
+	dashURL := strings.TrimRight(baseURL, "/") + "/dashboard"
+	subject := fmt.Sprintf("Лимит профиля «%s» исчерпан — VPN Panel", profileName)
+	body := fmt.Sprintf(`Привет, %s!
+
+На профиле «%s» был установлен лимит %s, и он исчерпан. Профиль отключён.
+Остальные ваши профили и подписка продолжают работать.
+
+Чтобы снова включить профиль — увеличьте лимит или сбросьте счётчик трафика
+в дашборде:
+%s
+
+Отключить такие уведомления можно в /settings.
+
+—
+VPN Panel`, username, profileName, formatBytes(limitBytes), dashURL)
+
+	return s.send(to, subject, body)
+}
+
 // SendFeedback — письмо от юзера с формы обратной связи на админский ящик.
 // subject уже очищен от CR/LF на стороне хендлера (защита от header injection).
 // Reply-To ставим на email юзера, чтобы можно было ответить прямо из почтовика.

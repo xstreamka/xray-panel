@@ -135,6 +135,41 @@ func (s *StatsCollector) notifyBlock(userID int, reason string) {
 // предупредительное письмо. Один раз, пока юзер не пополнит баланс.
 const trafficLowThreshold int64 = 1 * 1024 * 1024 * 1024 // 1 GiB
 
+// notifyProfileLimit асинхронно шлёт юзеру письмо «исчерпан personal-лимит
+// профиля». Идемпотентно через vpn_profiles.limit_notified_at: при смене
+// лимита (SetLimit), сбросе счётчика (ResetTraffic) или ручной активации
+// профиля флаг сбрасывается — следующий цикл превышения снова отправит письмо.
+func (s *StatsCollector) notifyProfileLimit(profileID, userID int, profileName string, limitBytes int64) {
+	if s.mailer == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		first, err := s.profiles.TryMarkLimitNotified(ctx, profileID)
+		if err != nil {
+			log.Printf("Notify profile limit: mark profile %d: %v", profileID, err)
+			return
+		}
+		if !first {
+			return
+		}
+
+		u, err := s.users.GetByID(ctx, userID)
+		if err != nil {
+			log.Printf("Notify profile limit: get user %d: %v", userID, err)
+			return
+		}
+		if !u.NotifyProfileLimit {
+			return
+		}
+		if err := s.mailer.SendProfileLimitNotification(u.Email, u.Username, profileName, limitBytes, s.baseURL); err != nil {
+			log.Printf("Notify profile limit email user=%d profile=%d: %v", userID, profileID, err)
+		}
+	}()
+}
+
 // notifyTrafficLow асинхронно шлёт юзеру письмо «скоро закончится трафик».
 // Вызывается после DeductTraffic, когда remaining в пороге (0, trafficLowThreshold].
 // Идемпотентно через traffic_low_notified_at — при пополнении флаг сбрасывается.
@@ -592,6 +627,12 @@ func (s *StatsCollector) disconnectUser(ctx context.Context, uuid string, total,
 	overshoot := total - limit
 	log.Printf("Enforce: %s disabled — limit %d, total %d, overshoot %.1f MB, blocked %d IPs",
 		uuid, limit, total, float64(overshoot)/(1024*1024), blocked)
+
+	// Письмо юзеру — «лимит профиля исчерпан, профиль выключен». Идемпотентно
+	// по profile.limit_notified_at. SetActive(false) выше не сбросил отметку
+	// (сброс только на TRUE), так что повторного письма при следующем
+	// enforceAll-проходе не будет.
+	s.notifyProfileLimit(p.ID, p.UserID, p.Name, limit)
 }
 
 // updateOnlineStatus — медленный цикл: онлайн-статус и IP-адреса
@@ -632,11 +673,22 @@ func (s *StatsCollector) enforceAll(ctx context.Context) {
 			continue
 		}
 
+		// Разбираем, из-за чего GetExceeded вернул профиль. SQL-фильтр
+		// объединяет expired / balance exhausted / personal-лимит; уведомление
+		// про personal-лимит шлём только в последнем случае — для expired и
+		// balance exhausted юзер получит своё письмо через notifyBlock.
+		expired := p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now())
+		limitHit := p.TrafficLimit > 0 && p.TrafficUp+p.TrafficDown >= p.TrafficLimit
+
 		reason := "traffic limit"
-		if p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now()) {
+		if expired {
 			reason = "expired"
 		}
 		log.Printf("EnforceAll: %s disabled — %s", p.UUID, reason)
+
+		if limitHit && !expired {
+			s.notifyProfileLimit(p.ID, p.UserID, p.Name, p.TrafficLimit)
+		}
 	}
 
 	if len(exceeded) > 0 {

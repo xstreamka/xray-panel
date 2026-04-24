@@ -25,6 +25,13 @@ type VPNProfile struct {
 	Username string `json:"username,omitempty"`
 }
 
+// ──────────────────────────────────────────────
+//  SQL-колонки profile — единый список, чтобы новые поля (например,
+//  limit_notified_at) не тянули за собой правку каждого SELECT-а. На чтение
+//  НЕ включаем limit_notified_at: он нужен только для idempotency-апдейтов
+//  (TryMarkLimitNotified) и не участвует в UI/API.
+// ──────────────────────────────────────────────
+
 type VPNProfileStore struct {
 	pool *pgxpool.Pool
 }
@@ -114,9 +121,17 @@ func (s *VPNProfileStore) UpdateTraffic(ctx context.Context, uuid string, up, do
 	return err
 }
 
+// SetActive меняет is_active на профиле. При активации сбрасывает
+// limit_notified_at, чтобы следующее превышение personal-лимита снова
+// отправило уведомление (аналогично тому, как пополнение баланса сбрасывает
+// block_notified_at у юзера).
 func (s *VPNProfileStore) SetActive(ctx context.Context, id int, active bool) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE vpn_profiles SET is_active = $1, updated_at = NOW() WHERE id = $2`,
+		`UPDATE vpn_profiles
+		 SET is_active         = $1,
+		     limit_notified_at = CASE WHEN $1 THEN NULL ELSE limit_notified_at END,
+		     updated_at        = NOW()
+		 WHERE id = $2`,
 		active, id,
 	)
 	return err
@@ -239,19 +254,52 @@ func (s *VPNProfileStore) GetByID(ctx context.Context, id int) (*VPNProfile, err
 	return p, nil
 }
 
+// SetLimit меняет personal-лимит профиля. Сбрасывает limit_notified_at —
+// это новый цикл потребления, и если юзер задал больший лимит (или 0 =
+// безлимит), письмо об исчерпании должно прийти снова при следующем
+// превышении, а не замалчиваться прошлой отметкой.
 func (s *VPNProfileStore) SetLimit(ctx context.Context, id int, limitBytes int64) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE vpn_profiles SET traffic_limit = $1, updated_at = NOW() WHERE id = $2`,
+		`UPDATE vpn_profiles
+		 SET traffic_limit     = $1,
+		     limit_notified_at = NULL,
+		     updated_at        = NOW()
+		 WHERE id = $2`,
 		limitBytes, id,
 	)
 	return err
 }
 
+// ResetTraffic обнуляет персональные счётчики. Сбрасывает limit_notified_at:
+// после сброса трафика цикл начинается заново, письмо об исчерпании
+// personal-лимита должно прийти снова, когда юзер опять его выберет.
 func (s *VPNProfileStore) ResetTraffic(ctx context.Context, id int) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE vpn_profiles SET traffic_up = 0, traffic_down = 0, updated_at = NOW() WHERE id = $1`, id,
+		`UPDATE vpn_profiles
+		 SET traffic_up        = 0,
+		     traffic_down      = 0,
+		     limit_notified_at = NULL,
+		     updated_at        = NOW()
+		 WHERE id = $1`, id,
 	)
 	return err
+}
+
+// TryMarkLimitNotified атомарно ставит limit_notified_at = NOW(), если он
+// ещё NULL, и возвращает true. Если отметка уже стоит — возвращает false,
+// и вызывающий код пропускает отправку письма. Сбрасывается при SetLimit,
+// ResetTraffic, SetActive(true) и ReactivateAllByUser — аналог поведения
+// TryMarkBlockNotified на уровне юзера.
+func (s *VPNProfileStore) TryMarkLimitNotified(ctx context.Context, id int) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE vpn_profiles SET limit_notified_at = NOW(), updated_at = NOW()
+		 WHERE id = $1 AND limit_notified_at IS NULL`,
+		id,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // DeactivateAllByUser помечает все активные профили юзера как inactive в БД.
@@ -282,9 +330,14 @@ func (s *VPNProfileStore) DeactivateAllByUser(ctx context.Context, userID int) (
 // ReactivateAllByUser включает все профили юзера (после успешного продления).
 // Сбрасывает их персональные счётчики? — НЕТ. traffic_up/down считаются кумулятивно
 // за всё время жизни профиля, сброс только через админку вручную.
+// Сбрасывает limit_notified_at: после реактивации следующий цикл превышения
+// personal-лимита должен снова отправить уведомление.
 func (s *VPNProfileStore) ReactivateAllByUser(ctx context.Context, userID int) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
-		`UPDATE vpn_profiles SET is_active = TRUE, updated_at = NOW()
+		`UPDATE vpn_profiles
+		 SET is_active         = TRUE,
+		     limit_notified_at = NULL,
+		     updated_at        = NOW()
 		 WHERE user_id = $1 AND is_active = FALSE
 		 RETURNING uuid`,
 		userID,
