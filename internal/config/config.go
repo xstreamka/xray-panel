@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 
@@ -13,6 +14,12 @@ type Config struct {
 	ListenAddr string
 	SecretKey  string
 	BaseURL    string // https://vpn.example.com — для ссылок в письмах
+
+	// TrustedProxies — список CIDR/IP (через запятую), от которых разрешено
+	// принимать X-Forwarded-For / X-Real-IP. Иначе любой клиент подделывает
+	// заголовок и обходит rate-limit. Если панель за nginx на том же хосте —
+	// "127.0.0.1/32,::1/128"; если nginx на отдельной машине — её IP.
+	TrustedProxies string
 
 	// PostgreSQL
 	DBHost string
@@ -27,6 +34,11 @@ type Config struct {
 	SMTPUser     string
 	SMTPPassword string
 	SMTPFrom     string
+
+	// FeedbackEmail — получатель писем с формы обратной связи.
+	// Отправка на SMTPFrom (= self) ненадёжна: Gmail/провайдеры часто
+	// отбивают self-loop либо кладут в спам, поэтому выделяем отдельный адрес.
+	FeedbackEmail string
 
 	// Xray
 	XrayAPIAddr    string // gRPC API адрес (127.0.0.1:10085)
@@ -65,6 +77,8 @@ func Load() (*Config, error) {
 		SecretKey:  getEnv("SECRET_KEY", ""),
 		BaseURL:    getEnv("BASE_URL", "http://localhost:8080"),
 
+		TrustedProxies: getEnv("TRUSTED_PROXIES", ""),
+
 		DBHost: getEnv("DB_HOST", "127.0.0.1"),
 		DBPort: getEnv("DB_PORT", "5432"),
 		DBUser: getEnv("DB_USER", "vpnpanel"),
@@ -76,6 +90,8 @@ func Load() (*Config, error) {
 		SMTPUser:     getEnv("SMTP_USER", ""),
 		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
 		SMTPFrom:     getEnv("SMTP_FROM", ""),
+
+		FeedbackEmail: getEnv("FEEDBACK_EMAIL", "xstreamka@gmail.com"),
 
 		XrayAPIAddr:    getEnv("XRAY_API_ADDR", "127.0.0.1:10085"),
 		XrayInboundTag: getEnv("XRAY_INBOUND_TAG", "vless-in"),
@@ -117,11 +133,18 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// DSN собирает URL подключения к Postgres. Юзер и пароль прогоняем через
+// url.UserPassword, иначе любой символ, который в URL имеет специальное значение
+// (%, @, :, /, пробел и т.п.), ломает парсер pgx с "invalid URL escape".
 func (c *Config) DSN() string {
-	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		c.DBUser, c.DBPass, c.DBHost, c.DBPort, c.DBName,
-	)
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(c.DBUser, c.DBPass),
+		Host:     fmt.Sprintf("%s:%s", c.DBHost, c.DBPort),
+		Path:     c.DBName,
+		RawQuery: "sslmode=disable",
+	}
+	return u.String()
 }
 
 // SMTPConfigured возвращает true если SMTP настроен

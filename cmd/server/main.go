@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"xray-panel/internal/handlers"
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
+	"xray-panel/internal/subscription"
 	"xray-panel/internal/xray"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +45,8 @@ func main() {
 	profileStore := models.NewVPNProfileStore(db.Pool)
 	tariffStore := models.NewTariffStore(db.Pool)
 	receiptStore := models.NewPaymentReceiptStore(db.Pool)
+	inviteStore := models.NewInviteStore(db.Pool)
+	trafficLogStore := models.NewTrafficLogStore(db.Pool)
 
 	// Генерируем Xray config.json из БД
 	activeUUIDs, err := profileStore.GetAllActiveUUIDs(context.Background())
@@ -58,11 +62,6 @@ func main() {
 
 	xrayHolder := xray.NewHolder()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go connectXray(ctx, cfg, xrayHolder, profileStore)
-
 	// Email sender (nil если SMTP не настроен)
 	var mailer *email.Sender
 	if cfg.SMTPConfigured() {
@@ -72,7 +71,18 @@ func main() {
 		log.Println("SMTP not configured — verification links will be logged to console")
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore, trafficLogStore, mailer, cfg.BaseURL)
+
+	subWorker := subscription.NewWorker(userStore, profileStore, mailer, xrayHolder, cfg.BaseURL)
+	go subWorker.Run(ctx)
+
 	// Шаблоны
+	// assetVersion — busts browser cache для css/js при каждом рестарте панели,
+	// чтобы клиенты гарантированно получали новый бандл после деплоя.
+	assetVersion := strconv.FormatInt(time.Now().Unix(), 10)
 	funcMap := template.FuncMap{
 		"formatBytes": formatBytes,
 		"divGB": func(b int64) string {
@@ -82,6 +92,7 @@ func main() {
 			}
 			return fmt.Sprintf("%.1f", gb)
 		},
+		"assetVersion": func() string { return assetVersion },
 	}
 	renderer, err := handlers.NewRenderer(
 		"internal/templates/layouts",
@@ -92,12 +103,20 @@ func main() {
 		log.Fatalf("Template error: %v", err)
 	}
 
-	authMW := middleware.NewAuthMiddleware(userStore, cfg.SecretKey)
-	authHandler := handlers.NewAuthHandler(userStore, authMW, renderer, mailer, cfg.BaseURL)
-	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, xrayHolder, cfg, renderer)
-	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, xrayHolder, renderer)
+	authMW := middleware.NewAuthMiddleware(userStore, cfg.SecretKey, cfg.BaseURL)
+	// Лимит на запросы восстановления пароля: 3 в час с одного IP.
+	// Значение продублировано константой handlers.ResetLimitMax для UI-сноски.
+	resetLimiter := middleware.NewRateLimiter(handlers.ResetLimitMax, time.Hour)
+	authHandler := handlers.NewAuthHandler(userStore, inviteStore, authMW, renderer, mailer, cfg.BaseURL, resetLimiter)
+	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, trafficLogStore, xrayHolder, cfg, renderer)
+	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, inviteStore, trafficLogStore, xrayHolder, renderer, cfg.BaseURL)
+	settingsHandler := handlers.NewSettingsHandler(userStore, renderer)
+	// Лимит обратной связи: 3 сообщения в час с одного IP — чтобы форму
+	// нельзя было использовать для спам-флуда на админский ящик.
+	feedbackLimiter := middleware.NewRateLimiter(3, time.Hour)
+	feedbackHandler := handlers.NewFeedbackHandler(renderer, mailer, cfg.FeedbackEmail, feedbackLimiter)
 	payHandler := handlers.NewPayHandler(
-		renderer, tariffStore, receiptStore, userStore, mailer,
+		renderer, tariffStore, receiptStore, userStore, mailer, xrayHolder,
 		cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret,
 	)
 
@@ -105,17 +124,20 @@ func main() {
 	loginLimiter := middleware.NewRateLimiter(5, time.Minute)
 
 	r := chi.NewRouter()
-	r.Use(chimw.RealIP)
+	// Кастомный RealIP: доверяем X-Forwarded-For/X-Real-IP только если
+	// соединение пришло из TRUSTED_PROXIES. Если список пуст — заголовки
+	// игнорируются. Это закрывает обход rate-limit подделкой XFF.
+	realIP := middleware.NewRealIP(cfg.TrustedProxies)
+	if cfg.TrustedProxies == "" {
+		log.Println("RealIP: TRUSTED_PROXIES is empty — proxy headers are ignored, peer IP is used as-is")
+	}
+	r.Use(realIP.Middleware)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Compress(5))
 
 	fs := http.FileServer(http.Dir("static"))
 	r.Handle("/static/*", http.StripPrefix("/static/", fs))
-
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
-	})
 
 	// Публичные роуты
 	r.Get("/login", authHandler.LoginPage)
@@ -124,6 +146,12 @@ func main() {
 	r.With(loginLimiter.Middleware).Post("/register", authHandler.Register)
 	r.Get("/verify", authHandler.VerifyEmail) // GET /verify?token=xxx
 	r.Get("/logout", authHandler.Logout)
+	// Восстановление пароля. Rate-limit (3/час) выполняется внутри хендлера,
+	// чтобы рендерить дружелюбную страницу вместо голого 429.
+	r.Get("/forgot", authHandler.ForgotPasswordPage)
+	r.Post("/forgot", authHandler.ForgotPassword)
+	r.Get("/reset", authHandler.ResetPasswordPage) // GET /reset?token=xxx
+	r.Post("/reset", authHandler.ResetPassword)
 	// Webhook от pay-service (защищён HMAC-подписью, не сессией)
 	r.Post("/api/payments/webhook", payHandler.Webhook)
 
@@ -139,9 +167,15 @@ func main() {
 		r.Use(authMW.RequireAuth)
 		r.Use(authMW.RequireVerified)
 
+		r.Get("/", dashHandler.Welcome)
 		r.Get("/dashboard", dashHandler.Index)
 		r.Get("/dashboard/stats", dashHandler.StatsJSON)
+		r.Get("/dashboard/traffic", dashHandler.TrafficChart)
+		r.Get("/dashboard/profiles/{id}/traffic", dashHandler.ProfileTrafficChart)
 		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
+		r.Post("/dashboard/profiles/{id}/limit", dashHandler.SetProfileLimit)
+		r.Post("/dashboard/profiles/{id}/toggle", dashHandler.ToggleProfile)
+		r.Post("/dashboard/profiles/{id}/reset", dashHandler.ResetProfileTraffic)
 		r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
 
 		// Оплата (редирект на pay-service)
@@ -149,21 +183,42 @@ func main() {
 		r.Post("/pay/checkout", payHandler.Checkout)
 		r.Get("/pay/history", payHandler.History)
 
+		// Настройки уведомлений
+		r.Get("/settings", settingsHandler.Index)
+		r.Post("/settings", settingsHandler.Save)
+
+		// Обратная связь
+		r.Get("/feedback", feedbackHandler.Index)
+		r.Post("/feedback", feedbackHandler.Send)
+
 		// Админка
 		r.Group(func(r chi.Router) {
 			r.Use(authMW.RequireAdmin)
 			r.Get("/admin", adminHandler.Users)
 			r.Get("/admin/stats", adminHandler.StatsJSON)
+			r.Get("/admin/users/{id}", adminHandler.UserView)
+			r.Get("/admin/users/{id}/traffic", adminHandler.UserTrafficChart)
 			r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
 			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
 			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
-			r.Post("/admin/users/{id}/balance", adminHandler.AddBalance)
+			r.Post("/admin/users/{id}/extra", adminHandler.SetExtraBalance)
+			r.Post("/admin/users/{id}/toggle", adminHandler.ToggleUserActive)
+			r.Post("/admin/users/{id}/subscription", adminHandler.SetSubscription)
+			r.Post("/admin/users/{id}/subscription/cancel", adminHandler.CancelSubscription)
 
 			// Тарифы
 			r.Get("/admin/tariffs", adminHandler.TariffsList)
 			r.Post("/admin/tariffs", adminHandler.TariffCreate)
 			r.Post("/admin/tariffs/{id}", adminHandler.TariffUpdate)
 			r.Post("/admin/tariffs/{id}/delete", adminHandler.TariffDelete)
+
+			// Инвайты + режим регистрации
+			r.Get("/admin/invites", adminHandler.InvitesList)
+			r.Post("/admin/invites", adminHandler.InviteCreate)
+			r.Post("/admin/invites/{id}/toggle", adminHandler.InviteToggle)
+			r.Post("/admin/invites/{id}/delete", adminHandler.InviteDelete)
+			r.Get("/admin/invites/{id}/users", adminHandler.InviteUsers)
+			r.Post("/admin/settings/registration-mode", adminHandler.SetRegistrationMode)
 		})
 	})
 
@@ -189,8 +244,17 @@ func main() {
 	}
 }
 
-func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, profiles *models.VPNProfileStore) {
-	firewall := xray.NewFirewall()
+func connectXray(
+	ctx context.Context,
+	cfg *config.Config,
+	holder *xray.Holder,
+	profiles *models.VPNProfileStore,
+	users *models.UserStore,
+	trafficLogs *models.TrafficLogStore,
+	mailer *email.Sender,
+	baseURL string,
+) {
+	firewall := xray.NewFirewall(cfg.ServerPort)
 	firewall.Init()
 	holder.SetFirewall(firewall)
 
@@ -212,7 +276,7 @@ func connectXray(ctx context.Context, cfg *config.Config, holder *xray.Holder, p
 
 		syncUsersToXray(ctx, client, profiles)
 
-		collector := xray.NewStatsCollector(client, profiles, firewall)
+		collector := xray.NewStatsCollector(client, profiles, users, trafficLogs, firewall, mailer, baseURL)
 		collector.InitCumulative(ctx)
 		holder.SetCollector(collector)
 		collector.Run(ctx)

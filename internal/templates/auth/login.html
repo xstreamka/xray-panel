@@ -1,9 +1,10 @@
 {{template "base" .}}
 
-{{define "title"}}Вход — VPN Panel{{end}}
+{{define "title"}}Вход — Панель для клиентов{{end}}
 
 {{define "content"}}
 <div style="max-width: 400px; margin: 4rem auto;">
+    <h1 class="auth-brand">Панель для клиентов</h1>
     <div class="card">
         <h2 style="margin-bottom: 1.5rem; text-align: center;">Вход</h2>
         {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
@@ -14,9 +15,14 @@
             <input type="password" id="password" name="password" required>
             <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;">Войти</button>
         </form>
+        <p style="text-align: center; margin-top: 0.8rem;">
+            <a href="/forgot" style="color: #38bdf8; font-size: 0.9rem;">Забыли пароль?</a>
+        </p>
+        {{if .ShowRegisterLink}}
         <p style="text-align: center; margin-top: 1rem; color: #94a3b8;">
             Нет аккаунта? <a href="/register" style="color: #38bdf8;">Регистрация</a>
         </p>
+        {{end}}
     </div>
 </div>
 {{end}}

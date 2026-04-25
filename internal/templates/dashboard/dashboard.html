@@ -2,48 +2,108 @@
 
 {{define "title"}}Dashboard — VPN Panel{{end}}
 
-{{define "nav"}}
-<nav>
-    <span class="brand">VPN Panel</span>
-    <div>
-        <span style="color: #e2e8f0;">{{.User.Username}}</span>
-        {{if .User.IsAdmin}}<a href="/admin">Админка</a>{{end}}
-        <a href="/logout">Выход</a>
-    </div>
-</nav>
-{{end}}
-
 {{define "content"}}
 <h1 style="margin: 1.5rem 0;">Мои VPN профили</h1>
 
-<!-- Баланс -->
-<div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-    <div>
-        <span style="color: #94a3b8;">Баланс трафика:</span>
-        <strong style="font-size: 1.3rem; margin-left: 0.5rem;" id="balance-display">{{formatBytes .User.TrafficBalance}}</strong>
+<!-- Тариф и подписка -->
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+            <span style="color: #94a3b8; font-size: 0.9rem;">Тариф:</span>
+            {{if .HasActiveSub}}
+                <strong style="font-size: 1.1rem;" data-stat="tariff-label">{{.TariffLabel}}</strong>
+                <span class="badge badge-green" data-stat="sub-badge">активна</span>
+            {{else if .TariffLabel}}
+                <strong style="font-size: 1.1rem;" data-stat="tariff-label">{{.TariffLabel}}</strong>
+                <span class="badge badge-red" data-stat="sub-badge">истёк</span>
+            {{else}}
+                <strong style="font-size: 1.1rem; color: #94a3b8;" data-stat="tariff-label">—</strong>
+                <span class="badge badge-gray" data-stat="sub-badge">нет подписки</span>
+            {{end}}
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="/pay" class="btn btn-primary">{{if .HasActiveSub}}Продлить{{else}}Оформить{{end}}</a>
+            <a href="/pay/history" class="btn btn-primary">История</a>
+        </div>
     </div>
-    <div style="display: flex; column-gap: 0.5rem;">
-        <a href="/pay" class="btn btn-primary">Пополнить</a>
-        <a href="/pay/history" class="btn btn-primary">История</a>
+
+    {{if and .HasActiveSub .User.TariffExpiresAt}}
+    <div style="display: flex; gap: 1.2rem; color: #94a3b8; font-size: 0.85rem; margin-bottom: 1rem; flex-wrap: wrap;">
+        <span>Действует до: <strong style="color: #e2e8f0;" data-stat="expires-at">{{.User.TariffExpiresAt.Format "02.01.2006"}}</strong></span>
+        <span data-stat="days-left-line">
+            Осталось: <strong style="color: {{if lt .DaysLeft 3}}#f59e0b{{else}}#e2e8f0{{end}};">{{.DaysLeft}} дн.</strong>
+        </span>
+    </div>
+    {{end}}
+
+    {{if gt .User.BaseTrafficLimit 0}}
+    <div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
+            <span>Базовый трафик подписки</span>
+            <span><strong style="color: #e2e8f0;" data-stat="base-used">{{formatBytes .User.BaseTrafficUsed}}</strong> / <span data-stat="base-limit">{{formatBytes .User.BaseTrafficLimit}}</span></span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 6px; overflow: hidden;">
+            <div data-stat="base-bar" style="background: {{if ge .BasePercent 90}}#ef4444{{else if ge .BasePercent 70}}#f59e0b{{else}}#22c55e{{end}}; width: {{.BasePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+        </div>
+    </div>
+    {{end}}
+
+    <div data-stat="extra-row" style="margin-top: 0.8rem; {{if le .User.ExtraTrafficGranted 0}}display: none;{{end}}">
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
+            <span>Докупленный трафик</span>
+            <span><strong style="color: #e2e8f0;" data-stat="extra-used">{{formatBytes .ExtraUsed}}</strong> / <span data-stat="extra-granted">{{formatBytes .User.ExtraTrafficGranted}}</span></span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 6px; overflow: hidden;">
+            <div data-stat="extra-bar" style="background: {{if ge .ExtraPercent 90}}#ef4444{{else if ge .ExtraPercent 70}}#f59e0b{{else}}#fcd34d{{end}}; width: {{.ExtraPercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 1.2rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #334155; flex-wrap: wrap; font-size: 0.9rem;">
+        <div>
+            <div style="color: #94a3b8; font-size: 0.8rem;">Всего доступно</div>
+            <strong style="font-size: 1.2rem;" id="balance-display">{{formatBytes .TotalAvailable}}</strong>
+        </div>
+        {{if gt .User.ExtraTrafficBalance 0}}
+        <div data-stat="extra-block">
+            <div style="color: #94a3b8; font-size: 0.8rem;">Докупленный</div>
+            <strong style="font-size: 1.1rem; color: #fcd34d;" data-stat="extra-balance">{{formatBytes .User.ExtraTrafficBalance}}</strong>
+        </div>
+        {{else}}
+        <div data-stat="extra-block" style="display: none;">
+            <div style="color: #94a3b8; font-size: 0.8rem;">Докупленный</div>
+            <strong style="font-size: 1.1rem; color: #fcd34d;" data-stat="extra-balance">0 B</strong>
+        </div>
+        {{end}}
+        {{if gt .User.FrozenExtraBalance 0}}
+        <div data-stat="frozen-block" title="Трафик сохранится до следующей оплаты подписки">
+            <div style="color: #94a3b8; font-size: 0.8rem;">❄ Заморожено</div>
+            <strong style="font-size: 1.1rem; color: #60a5fa;" data-stat="frozen-balance">{{formatBytes .User.FrozenExtraBalance}}</strong>
+        </div>
+        {{else}}
+        <div data-stat="frozen-block" style="display: none;" title="Трафик сохранится до следующей оплаты подписки">
+            <div style="color: #94a3b8; font-size: 0.8rem;">❄ Заморожено</div>
+            <strong style="font-size: 1.1rem; color: #60a5fa;" data-stat="frozen-balance">0 B</strong>
+        </div>
+        {{end}}
     </div>
 </div>
 
 <!-- Создание профиля -->
 <div class="card">
-    <form method="POST" action="/dashboard/profiles" style="display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;">
+    <form method="POST" action="/dashboard/profiles" style="display: flex; gap: 0.8rem; align-items: end; flex-wrap: wrap;">
         <div style="flex: 1; min-width: 150px;">
             <label for="name">Имя профиля</label>
             <input type="text" id="name" name="name" placeholder="phone, laptop, ..." style="margin-bottom: 0;">
         </div>
-        <div style="min-width: 120px;">
-            <label for="limit_gb">Выделить ГБ</label>
-            <input type="number" id="limit_gb" name="limit_gb" step="0.5" min="0.5" value="5" required
-                style="margin-bottom: 0; width: 100%; padding: 0.6rem; border: 1px solid #334155; border-radius: 6px; background: #0f172a; color: #e2e8f0; font-size: 1rem;">
+        <div style="min-width: 140px;">
+            <label for="limit_gb">Личный лимит, ГБ</label>
+            <input type="number" id="limit_gb" name="limit_gb" step="0.5" min="0" value="0" style="margin-bottom: 0;">
         </div>
-        <button type="submit" class="btn btn-primary">Создать профиль</button>
+        <button type="submit" class="btn btn-primary" data-stat="create-profile-btn"
+                {{if le .TotalAvailable 0}}disabled title="Нет доступного трафика. Оплатите тариф."{{end}}>Создать профиль</button>
     </form>
-    <p style="color: #64748b; font-size: 0.8rem; margin-top: 0.5rem;">
-        ГБ списываются с баланса. При удалении профиля неиспользованный трафик возвращается.
+    <p style="color: #64748b; font-size: 0.8rem; margin-top: 0.6rem;">
+        Трафик всех профилей списывается из общего баланса подписки. Личный лимит — опционально, для ограничения конкретного устройства (0 = без лимита).
     </p>
 </div>
 
@@ -70,10 +130,28 @@
             {{end}}
         </div>
         <div style="display: flex; gap: 0.4rem;">
+            {{if .IsActive}}
             <button class="btn btn-sm btn-primary" onclick="copyURI(this)" data-uri="{{.VlessURI}}">Копировать</button>
             <button class="btn btn-sm btn-primary" onclick="showQR(this)" data-uri="{{.VlessURI}}">QR</button>
+            <button class="btn btn-sm btn-primary" onclick="showProfileChart(this)"
+                    data-profile-id="{{.ID}}" data-profile-name="{{.Name}}">График</button>
+            <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
+                <input type="hidden" name="action" value="deactivate">
+                <button type="submit" class="btn btn-sm" style="background: #475569; color: white;" title="Выключить профиль (можно включить позже)">Выкл</button>
+            </form>
+            {{else}}
+            <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
+                <input type="hidden" name="action" value="activate">
+                <button type="submit" class="btn btn-sm btn-primary" data-stat="activate-btn"
+                        {{if le $.TotalAvailable 0}}disabled title="Нет доступного трафика. Оплатите тариф."{{else}}title="Включить профиль"{{end}}>Вкл</button>
+            </form>
+            {{end}}
+            <form method="POST" action="/dashboard/profiles/{{.ID}}/reset" style="display:inline;"
+                  onsubmit="return confirm('Сбросить трафик профиля? Счётчики устройства обнулятся.');">
+                <button type="submit" class="btn btn-sm" style="background: #475569; color: white;" title="Обнулить счётчики трафика этого устройства">Сброс</button>
+            </form>
             <form method="POST" action="/dashboard/profiles/{{.ID}}/delete" style="display:inline;">
-                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль? Неиспользованный трафик вернётся на баланс.')">✕</button>
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль? Баланс не изменится — трафик общий на подписку.')">✕</button>
             </form>
         </div>
     </div>
@@ -82,13 +160,22 @@
     <div class="uri-box">{{.VlessURI}}</div>
     {{end}}
 
-    <div class="stats">
+    <div class="stats" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
         <span class="stat" data-stat="up">↑ {{formatBytes .TrafficUp}}</span>
         <span class="stat" data-stat="down">↓ {{formatBytes .TrafficDown}}</span>
         <span class="stat" data-stat="total">Σ {{formatBytes .TrafficTotal}}</span>
         {{if .ExpiresAt}}
             <span class="stat">До: {{.ExpiresAt.Format "02.01.2006"}}</span>
         {{end}}
+        <form method="POST" action="/dashboard/profiles/{{.ID}}/limit"
+              style="display: flex; gap: 0.3rem; align-items: center; margin-left: auto;"
+              title="Личный лимит устройства (0 = безлимит)">
+            <label style="color: #94a3b8; font-size: 0.85rem; margin: 0;">Лимит:</label>
+            <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
+                style="width: 80px; padding: 0.25rem 0.4rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
+            <span style="color: #94a3b8; font-size: 0.8rem;">ГБ</span>
+            <button type="submit" class="btn btn-sm btn-primary">OK</button>
+        </form>
     </div>
 
     {{if gt .TrafficLimit 0}}
@@ -106,13 +193,37 @@
 {{end}}
 {{else}}
 <div class="card" style="text-align: center; color: #94a3b8;">
-    {{if gt .User.TrafficBalance 0}}
+    {{if gt .TotalAvailable 0}}
         У вас пока нет VPN профилей. Создайте первый!
+    {{else if .HasActiveSub}}
+        Базовый трафик подписки исчерпан. Докупите пакет на странице оплаты.
     {{else}}
-        Пополните баланс, чтобы создать VPN профиль.
+        Оформите подписку, чтобы создать VPN профиль.
     {{end}}
 </div>
 {{end}}
+
+<!-- График трафика -->
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Статистика трафика</h3>
+        <div id="traffic-range" style="display: flex; gap: 0.3rem; flex-wrap: wrap;">
+            <button type="button" class="btn btn-sm btn-primary" data-range="24h">24 часа</button>
+            <button type="button" class="btn btn-sm" data-range="7d"  style="background: #334155; color: #e2e8f0;">7 дней</button>
+            <button type="button" class="btn btn-sm" data-range="30d" style="background: #334155; color: #e2e8f0;">30 дней</button>
+            <button type="button" class="btn btn-sm" data-range="90d" style="background: #334155; color: #e2e8f0;">90 дней</button>
+        </div>
+    </div>
+    <div style="position: relative; height: 260px;">
+        <canvas id="traffic-chart"></canvas>
+        <div id="traffic-empty" style="position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #64748b; font-size: 0.9rem;">
+            Нет данных за выбранный период
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/js/traffic-chart.js?v={{assetVersion}}" defer></script>
 
 <!-- QR модалка -->
 <div id="qr-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; align-items:center; justify-content:center;" onclick="this.style.display='none'">
@@ -121,94 +232,33 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
-<script>
-function copyURI(btn) {
-    navigator.clipboard.writeText(btn.dataset.uri).then(() => {
-        const orig = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = orig, 1500);
-    });
-}
-function showQR(btn) {
-    const modal = document.getElementById('qr-modal');
-    const container = document.getElementById('qr-canvas');
-    container.innerHTML = '';
-    new QRCode(container, {
-        text: btn.dataset.uri,
-        width: 280,
-        height: 280,
-        correctLevel: QRCode.CorrectLevel.L
-    });
-    modal.style.display = 'flex';
-}
+<!-- Модалка с графиком профиля -->
+<div id="profile-chart-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:100; align-items:center; justify-content:center; padding: 1rem;"
+     onclick="if(event.target===this) this.style.display='none'">
+    <div style="background: #1e293b; padding: 1.25rem; border-radius: 12px; width: 100%; max-width: 720px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.8rem; flex-wrap:wrap; margin-bottom:1rem;">
+            <h3 style="margin:0;">Трафик: <span id="profile-chart-name" style="color:#94a3b8;"></span></h3>
+            <div style="display:flex; gap:0.3rem; flex-wrap:wrap;">
+                <div id="profile-chart-range" style="display:flex; gap:0.3rem; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-sm btn-primary" data-range="24h">24 часа</button>
+                    <button type="button" class="btn btn-sm" data-range="7d"  style="background:#334155; color:#e2e8f0;">7 дней</button>
+                    <button type="button" class="btn btn-sm" data-range="30d" style="background:#334155; color:#e2e8f0;">30 дней</button>
+                    <button type="button" class="btn btn-sm" data-range="90d" style="background:#334155; color:#e2e8f0;">90 дней</button>
+                </div>
+                <button type="button" class="btn btn-sm" style="background:#475569; color:white;"
+                        onclick="document.getElementById('profile-chart-modal').style.display='none'">✕</button>
+            </div>
+        </div>
+        <div style="position:relative; height:320px;">
+            <canvas id="profile-chart-canvas"></canvas>
+            <div id="profile-chart-empty" style="position:absolute; inset:0; display:none; align-items:center; justify-content:center; color:#64748b; font-size:0.9rem;">
+                Нет данных за выбранный период
+            </div>
+        </div>
+    </div>
+</div>
 
-function refreshStats() {
-    fetch('/dashboard/stats')
-        .then(r => r.json())
-        .then(data => {
-            // Обновляем баланс
-            const balanceEl = document.getElementById('balance-display');
-            if (balanceEl && data.balance_fmt) balanceEl.textContent = data.balance_fmt;
-
-            (data.profiles || []).forEach(s => {
-                const card = document.querySelector(`[data-profile-id="${s.id}"]`);
-                if (!card) return;
-
-                const up = card.querySelector('[data-stat="up"]');
-                const down = card.querySelector('[data-stat="down"]');
-                const total = card.querySelector('[data-stat="total"]');
-                if (up) up.textContent = '↑ ' + s.traffic_up_fmt;
-                if (down) down.textContent = '↓ ' + s.traffic_down_fmt;
-                if (total) total.textContent = 'Σ ' + s.traffic_total_fmt;
-
-                const usageText = card.querySelector('[data-stat="usage-text"]');
-                const usagePct = card.querySelector('[data-stat="usage-pct"]');
-                const bar = card.querySelector('[data-stat="progress-bar"]');
-                if (usageText && s.limit_fmt) usageText.textContent = s.traffic_total_fmt + ' / ' + s.limit_fmt;
-                if (usagePct) usagePct.textContent = s.usage_percent + '%';
-                if (bar) {
-                    bar.style.width = s.usage_percent + '%';
-                    if (s.progress_color) bar.style.background = s.progress_color;
-                }
-
-                const statusEl = card.querySelector('[data-stat="status"]');
-                const ipsEl = card.querySelector('[data-stat="ips"]');
-                if (statusEl) {
-                    statusEl.style.background = '';
-                    statusEl.style.color = '';
-                    if (!s.is_active) {
-                        if (s.is_expired) {
-                            statusEl.className = 'badge badge-red';
-                            statusEl.textContent = 'expired';
-                        } else if (s.is_over_limit) {
-                            statusEl.className = 'badge badge-red';
-                            statusEl.textContent = 'лимит';
-                        } else {
-                            statusEl.className = 'badge badge-red';
-                            statusEl.textContent = 'disabled';
-                        }
-                    } else if (s.is_online) {
-                        statusEl.className = 'badge badge-green';
-                        statusEl.textContent = '● online';
-                    } else {
-                        statusEl.className = 'badge badge-blue';
-                        statusEl.textContent = 'active';
-                    }
-                }
-                card.style.opacity = s.is_active ? '' : '0.6';
-                if (ipsEl) {
-                    const ips = s.online_ips || [];
-                    if (s.is_active && s.is_online && ips.length > 0) {
-                        ipsEl.innerHTML = ips.map(ip => '<span class="badge badge-blue">' + ip + '</span> ').join('');
-                    } else {
-                        ipsEl.innerHTML = '';
-                    }
-                }
-            });
-        })
-        .catch(() => {});
-}
-setInterval(refreshStats, 5000);
-</script>
+<script src="/static/js/qrcode.min.js?v={{assetVersion}}"></script>
+<script src="/static/js/dashboard.js?v={{assetVersion}}" defer></script>
+<script src="/static/js/profile-chart.js?v={{assetVersion}}" defer></script>
 {{end}}

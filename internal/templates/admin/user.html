@@ -1,0 +1,333 @@
+{{template "base" .}}
+
+{{define "title"}}{{.View.Username}} — VPN Panel{{end}}
+
+{{define "content"}}
+{{with .View}}
+<div style="margin: 1.5rem 0;">
+    <a href="/admin" style="color: #38bdf8; font-size: 0.9rem;">← К списку пользователей</a>
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-top: 0.6rem; gap: 1rem; flex-wrap: wrap;">
+        <div>
+            <h1 style="margin: 0; font-size: 1.8rem;">{{.Username}}</h1>
+            <div style="color: #94a3b8; margin-top: 0.3rem;">{{.Email}}</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="color: #94a3b8; font-size: 0.85rem;">Обновление:</span>
+            <select id="refresh-interval" onchange="setRefresh(this.value)"
+                style="padding: 0.3rem 0.5rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem; width: auto; margin: 0;">
+                <option value="0">выкл</option>
+                <option value="5">5 сек</option>
+                <option value="10">10 сек</option>
+                <option value="15">15 сек</option>
+                <option value="30" selected>30 сек</option>
+                <option value="60">1 мин</option>
+            </select>
+            <span id="refresh-countdown" style="color: #64748b; font-size: 0.8rem; min-width: 30px;"></span>
+        </div>
+    </div>
+</div>
+
+<div data-user-id="{{.ID}}">
+
+<!-- ==========================================
+     Учётная запись: статусы + быстрые действия
+     ========================================== -->
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Учётная запись</h3>
+        {{if ne .ID $.User.ID}}
+        <div style="display: flex; gap: 0.5rem;">
+            {{if .IsActive}}
+            <form method="POST" action="/admin/users/{{.ID}}/toggle"
+                  onsubmit="return confirm('Выключить пользователя {{.Username}}? Его выкинет из сессии, а VPN-профили отключатся.');">
+                <input type="hidden" name="action" value="deactivate">
+                <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                <button type="submit" class="btn btn-danger">Выключить учётку</button>
+            </form>
+            {{else}}
+            <form method="POST" action="/admin/users/{{.ID}}/toggle">
+                <input type="hidden" name="action" value="activate">
+                <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                <button type="submit" class="btn btn-primary">Включить учётку</button>
+            </form>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
+        {{if .IsAdmin}}<span class="badge badge-green">admin</span>{{end}}
+        {{if .IsActive}}
+            <span class="badge badge-green">учётка активна</span>
+        {{else}}
+            <span class="badge badge-red">учётка выключена</span>
+        {{end}}
+        {{if .EmailVerified}}
+            <span class="badge badge-green">✉ email подтверждён</span>
+        {{else}}
+            <span class="badge badge-red">✉ email не подтверждён</span>
+        {{end}}
+        {{if gt .OnlineCount 0}}
+            <span class="badge badge-green" data-stat="user-online">online ({{.OnlineCount}})</span>
+        {{else}}
+            <span class="badge badge-gray" data-stat="user-online">offline</span>
+        {{end}}
+        {{if $.Invite}}
+            <a href="/admin/invites/{{$.Invite.ID}}/users" class="badge badge-blue"
+               title="Пользователь пришёл по инвайту {{$.Invite.Code}}"
+               style="text-decoration: none;">🔗 инвайт #{{$.Invite.ID}}</a>
+        {{end}}
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.8rem;">
+        <div style="background: #0f172a; padding: 0.8rem 1rem; border-radius: 6px;">
+            <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.2rem;">Профили</div>
+            <div style="font-size: 1.2rem;"><strong>{{.ActiveCount}}</strong> <span style="color: #94a3b8; font-size: 0.9rem;">/ {{len .Profiles}}</span></div>
+        </div>
+        <div style="background: #0f172a; padding: 0.8rem 1rem; border-radius: 6px;"
+             title="Сумма счётчиков по активным VPN-профилям. Обнуляется кнопкой «Сброс» у профиля и исчезает при удалении профиля — для контроля реальных списаний с баланса смотрите блок «Баланс трафика».">
+            <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.2rem;">
+                Σ по профилям
+                <span style="color: #64748b;" title="Сумма traffic_up + traffic_down по профилям юзера. Сбрасывается кнопкой «Сброс» у профиля.">ⓘ</span>
+            </div>
+            <div style="font-size: 1.2rem;" data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</div>
+        </div>
+        <div style="background: #0f172a; padding: 0.8rem 1rem; border-radius: 6px;">
+            <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.2rem;">Зарегистрирован</div>
+            <div style="font-size: 0.95rem;">{{.CreatedAt.Format "02.01.2006 15:04"}}</div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+     Подписка
+     ========================================== -->
+<div class="card">
+    <h3 style="margin-top: 0; margin-bottom: 1rem;">Подписка</h3>
+
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.2rem; padding: 1rem; background: #0f172a; border-radius: 6px;">
+        {{if .TariffLabel}}
+            <div>
+                <div style="color: #94a3b8; font-size: 0.8rem;">Текущий тариф</div>
+                <div style="font-size: 1.3rem; font-weight: bold;">{{.TariffLabel}}</div>
+            </div>
+            {{if .TariffExpiresAt}}
+            <div>
+                <div style="color: #94a3b8; font-size: 0.8rem;">Действует до</div>
+                <div style="font-size: 1.1rem;">
+                    {{.TariffExpiresAt.Format "02.01.2006"}}
+                    {{if gt .DaysLeft 0}}
+                        <span class="badge badge-green" style="margin-left: 0.4rem;">{{.DaysLeft}} дн.</span>
+                    {{else}}
+                        <span class="badge badge-red" style="margin-left: 0.4rem;">истёк</span>
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
+        {{else}}
+            <div style="color: #94a3b8;">Подписка не активирована</div>
+        {{end}}
+    </div>
+
+    <form method="POST" action="/admin/users/{{.ID}}/subscription" style="margin-bottom: 1rem;">
+        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+        <div style="display: grid; grid-template-columns: 2fr 1fr auto; gap: 0.8rem; align-items: end;">
+            <div>
+                <label for="sub-tariff">Тариф</label>
+                <select id="sub-tariff" name="tariff_id" style="margin: 0;">
+                    <option value="">— выберите тариф —</option>
+                    {{range $.SubPlans}}
+                    <option value="{{.ID}}">{{.Label}} ({{.DurationDays}} дн.)</option>
+                    {{end}}
+                </select>
+            </div>
+            <div>
+                <label for="sub-days">Срок (дн.)</label>
+                <input type="number" id="sub-days" name="duration_days" min="0" placeholder="как в тарифе" style="margin: 0;">
+            </div>
+            <button type="submit" class="btn btn-primary" style="height: fit-content;">Активировать / продлить</button>
+        </div>
+    </form>
+
+    {{if .TariffLabel}}
+    <form method="POST" action="/admin/users/{{.ID}}/subscription/cancel"
+          onsubmit="return confirm('Отменить подписку? base обнулится, extra/frozen останется.');">
+        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+        <button type="submit" class="btn" style="background: #475569; color: white;">Отменить подписку</button>
+    </form>
+    {{end}}
+</div>
+
+<!-- ==========================================
+     Баланс трафика
+     ========================================== -->
+<div class="card">
+    <h3 style="margin-top: 0; margin-bottom: 1rem;">Баланс трафика</h3>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.8rem; margin-bottom: 1.2rem;">
+        <div style="background: #0f172a; padding: 1rem; border-radius: 6px;">
+            <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.3rem;">База (в рамках подписки)</div>
+            <div style="font-size: 1.1rem;" data-stat="user-base">
+                {{formatBytes .BaseTrafficUsed}} / {{formatBytes .BaseTrafficLimit}}
+            </div>
+        </div>
+        <div style="background: #0f172a; padding: 1rem; border-radius: 6px;">
+            <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.3rem;">Extra (докупленный)</div>
+            <div style="font-size: 1.1rem; color: #fcd34d;" data-stat="user-extra">{{formatBytes .ExtraTrafficBalance}}</div>
+        </div>
+        {{if gt .FrozenExtraBalance 0}}
+        <div style="background: #0f172a; padding: 1rem; border-radius: 6px;">
+            <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.3rem;">❄ Заморожено</div>
+            <div style="font-size: 1.1rem; color: #60a5fa;">{{formatBytes .FrozenExtraBalance}}</div>
+        </div>
+        {{end}}
+        <div style="background: #0f172a; padding: 1rem; border-radius: 6px;">
+            <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.3rem;">Всего доступно</div>
+            <div style="font-size: 1.1rem; font-weight: bold;" data-stat="user-balance">{{formatBytes .TotalAvailable}}</div>
+        </div>
+    </div>
+
+    <div data-stat="user-base-row" style="margin-bottom: 1rem; {{if le .BaseTrafficLimit 0}}display: none;{{end}}">
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
+            <span>Базовый трафик подписки</span>
+            <span><strong style="color: #e2e8f0;" data-stat="user-base-used">{{formatBytes .BaseTrafficUsed}}</strong> / <span data-stat="user-base-limit">{{formatBytes .BaseTrafficLimit}}</span> · <span data-stat="user-base-pct">{{.BasePercent}}</span>%</span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 8px; overflow: hidden;">
+            <div data-stat="user-base-bar" style="background: {{if ge .BasePercent 90}}#ef4444{{else if ge .BasePercent 70}}#f59e0b{{else}}#22c55e{{end}}; width: {{.BasePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+        </div>
+    </div>
+
+    <div data-stat="user-extra-row" style="margin-bottom: 1rem; {{if le .ExtraTrafficGranted 0}}display: none;{{end}}">
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.3rem;">
+            <span>Докупленный трафик</span>
+            <span><strong style="color: #e2e8f0;" data-stat="user-extra-used">{{formatBytes .ExtraUsed}}</strong> / <span data-stat="user-extra-granted">{{formatBytes .ExtraTrafficGranted}}</span> · <span data-stat="user-extra-pct">{{.ExtraPercent}}</span>%</span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 8px; overflow: hidden;">
+            <div data-stat="user-extra-bar" style="background: {{if ge .ExtraPercent 90}}#ef4444{{else if ge .ExtraPercent 70}}#f59e0b{{else}}#fcd34d{{end}}; width: {{.ExtraPercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+        </div>
+    </div>
+
+    <form method="POST" action="/admin/users/{{.ID}}/extra"
+          title="Установить extra-баланс (ГБ) — и плюс, и минус">
+        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+        <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.8rem; align-items: end; max-width: 400px;">
+            <div>
+                <label for="extra-gb">Установить Extra-баланс (ГБ)</label>
+                <input type="number" id="extra-gb" name="extra_gb" step="0.01" min="0" value="{{divGB .ExtraTrafficBalance}}" style="margin: 0;">
+            </div>
+            <button type="submit" class="btn btn-primary" style="height: fit-content;">Сохранить</button>
+        </div>
+    </form>
+</div>
+
+<!-- ==========================================
+     VPN-профили
+     ========================================== -->
+<div class="card">
+    <h3 style="margin-top: 0; margin-bottom: 1rem;">VPN-профили</h3>
+
+    {{if .Profiles}}
+    <table>
+        <tr>
+            <th>Профиль</th>
+            <th>Статус</th>
+            <th>Трафик</th>
+            <th>Лимит</th>
+            <th style="text-align: right;">Действия</th>
+        </tr>
+        {{range .Profiles}}
+        <tr data-profile-id="{{.ID}}">
+            <td>
+                <strong>{{.Name}}</strong>
+                <div style="font-size: 0.7rem; color: #64748b; font-family: monospace; margin-top: 0.2rem;">{{.UUID}}</div>
+            </td>
+            <td>
+                {{if .IsActive}}
+                    {{if .IsOnline}}
+                        <span class="badge badge-green" data-stat="profile-status">● online</span>
+                        <span data-stat="profile-ips">{{range .OnlineIPs}}<span class="badge badge-blue">{{.}}</span> {{end}}</span>
+                    {{else}}
+                        <span class="badge badge-blue" data-stat="profile-status">active</span>
+                        <span data-stat="profile-ips"></span>
+                    {{end}}
+                {{else}}
+                    <span class="badge badge-red" data-stat="profile-status">disabled</span>
+                    <span data-stat="profile-ips"></span>
+                {{end}}
+            </td>
+            <td>
+                <div style="display: flex; flex-direction: column; gap: 0.3rem; min-width: 140px;">
+                    <span class="stat" data-stat="profile-traffic">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
+                    <div data-stat="profile-usage-text" style="font-size: 0.75rem; color: #94a3b8; {{if le .TrafficLimit 0}}display: none;{{end}}">
+                        Σ <span data-stat="profile-total">{{formatBytes .TrafficTotal}}</span> / <span data-stat="profile-limit">{{formatBytes .TrafficLimit}}</span> · <span data-stat="profile-pct">{{.UsagePercent}}</span>%
+                    </div>
+                    <div data-stat="profile-bar-wrap" style="background: #334155; border-radius: 4px; height: 5px; overflow: hidden; {{if le .TrafficLimit 0}}display: none;{{end}}">
+                        <div data-stat="profile-bar" style="background: {{.ProgressColor}}; width: {{.UsagePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <form method="POST" action="/admin/profiles/{{.ID}}/limit" style="display: flex; gap: 0.3rem; align-items: center;">
+                    <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                    <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
+                        style="width: 80px; padding: 0.3rem 0.5rem; margin: 0;">
+                    <span style="color: #94a3b8; font-size: 0.8rem;">GB</span>
+                    <button type="submit" class="btn btn-sm btn-primary">OK</button>
+                </form>
+            </td>
+            <td style="text-align: right;">
+                <div style="display: inline-flex; gap: 0.3rem;">
+                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle"
+                          data-stat="profile-toggle-deactivate" style="{{if not .IsActive}}display: none;{{end}}">
+                        <input type="hidden" name="action" value="deactivate">
+                        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                        <button type="submit" class="btn btn-sm btn-danger">Откл</button>
+                    </form>
+                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle"
+                          data-stat="profile-toggle-activate" style="{{if .IsActive}}display: none;{{end}}">
+                        <input type="hidden" name="action" value="activate">
+                        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                        <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
+                    </form>
+                    <form method="POST" action="/admin/profiles/{{.ID}}/reset" onsubmit="return confirm('Сбросить трафик?')">
+                        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                        <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Сброс</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {{end}}
+    </table>
+    {{else}}
+    <p style="color: #64748b; margin: 0;">У пользователя нет VPN-профилей.</p>
+    {{end}}
+</div>
+
+<!-- ==========================================
+     График трафика
+     ========================================== -->
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">Статистика трафика</h3>
+        <div id="traffic-range" style="display: flex; gap: 0.3rem; flex-wrap: wrap;">
+            <button type="button" class="btn btn-sm btn-primary" data-range="24h">24 часа</button>
+            <button type="button" class="btn btn-sm" data-range="7d"  style="background: #334155; color: #e2e8f0;">7 дней</button>
+            <button type="button" class="btn btn-sm" data-range="30d" style="background: #334155; color: #e2e8f0;">30 дней</button>
+            <button type="button" class="btn btn-sm" data-range="90d" style="background: #334155; color: #e2e8f0;">90 дней</button>
+        </div>
+    </div>
+    <div style="position: relative; height: 260px;">
+        <canvas id="traffic-chart" data-traffic-url="/admin/users/{{.ID}}/traffic"></canvas>
+        <div id="traffic-empty" style="position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #64748b; font-size: 0.9rem;">
+            Нет данных за выбранный период
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/js/traffic-chart.js?v={{assetVersion}}" defer></script>
+
+</div>
+{{end}}
+<script src="/static/js/admin.js?v={{assetVersion}}" defer></script>
+{{end}}

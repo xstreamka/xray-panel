@@ -1,23 +1,49 @@
 {{template "base" .}}
 
-{{define "title"}}Регистрация — VPN Panel{{end}}
+{{define "title"}}Регистрация — Панель для клиентов{{end}}
 
 {{define "content"}}
-<div style="max-width: 400px; margin: 4rem auto;">
+<div style="max-width: 440px; margin: 4rem auto;">
+    <h1 class="auth-brand">Панель для клиентов</h1>
     <div class="card">
         <h2 style="margin-bottom: 1.5rem; text-align: center;">Регистрация</h2>
-        {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
-        <form method="POST" action="/register">
-            <label for="username">Логин</label>
-            <input type="text" id="username" name="username" required autofocus>
-            <label for="email">Email</label>
-            <input type="email" id="email" name="email" required>
-            <label for="password">Пароль</label>
-            <input type="password" id="password" name="password" required minlength="6">
-            <label for="password_confirm">Пароль ещё раз</label>
-            <input type="password" id="password_confirm" name="password_confirm" required minlength="6">
-            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;">Зарегистрироваться</button>
-        </form>
+
+        {{if .Allow}}
+            {{if .InviteCode}}
+            <div style="background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; font-size: 0.85rem; color: #cbd5e1;">
+                Вы регистрируетесь по приглашению.
+            </div>
+            {{end}}
+            {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+            <form method="POST" action="/register{{if .InviteCode}}?invite={{.InviteCode}}{{end}}">
+                {{if .InviteCode}}<input type="hidden" name="invite" value="{{.InviteCode}}">{{end}}
+                <label for="username">Логин</label>
+                <input type="text" id="username" name="username" required autofocus value="{{.Username}}">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" required value="{{.EmailVal}}">
+                <label for="password">Пароль</label>
+                <input type="password" id="password" name="password" required minlength="6">
+                <label for="password_confirm">Пароль ещё раз</label>
+                <input type="password" id="password_confirm" name="password_confirm" required minlength="6">
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;">Зарегистрироваться</button>
+            </form>
+        {{else if eq .StateKind "disabled"}}
+            <div style="text-align: center;">
+                <p style="color: #cbd5e1; margin-bottom: 0.5rem;">Регистрация временно закрыта.</p>
+                <p style="color: #94a3b8; font-size: 0.85rem;">Обратитесь к администратору.</p>
+            </div>
+        {{else if eq .StateKind "invite_only"}}
+            <div style="text-align: center;">
+                <p style="color: #cbd5e1; margin-bottom: 0.5rem;">Регистрация только по приглашению.</p>
+                <p style="color: #94a3b8; font-size: 0.85rem;">Если у вас есть ссылка-приглашение — перейдите по ней. Если ссылки нет, обратитесь к тому, кто вас приглашает.</p>
+            </div>
+        {{else if eq .StateKind "invite_invalid"}}
+            <div style="text-align: center;">
+                <p style="color: #cbd5e1; margin-bottom: 0.5rem;">Ссылка-приглашение недействительна или отозвана.</p>
+                <p style="color: #94a3b8; font-size: 0.85rem;">Попросите новый инвайт или обратитесь к администратору.</p>
+            </div>
+        {{end}}
+
         <p style="text-align: center; margin-top: 1rem; color: #94a3b8;">
             Уже есть аккаунт? <a href="/login" style="color: #38bdf8;">Войти</a>
         </p>

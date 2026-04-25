@@ -2,26 +2,14 @@
 
 {{define "title"}}Админка — VPN Panel{{end}}
 
-{{define "nav"}}
-<nav>
-    <span class="brand">VPN Panel</span>
-    <div>
-        <a href="/admin">Пользователи</a>
-        <a href="/admin/tariffs">Тарифы</a>
-        <a href="/dashboard">Dashboard</a>
-        <a href="/logout">Выход</a>
-    </div>
-</nav>
-{{end}}
-
 {{define "content"}}
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin: 1.5rem 0;">
-    <h1>Управление пользователями</h1>
+<div style="display: flex; justify-content: space-between; align-items: center; margin: 1.5rem 0; gap: 1rem; flex-wrap: wrap;">
+    <h1 style="margin: 0;">Пользователи</h1>
     <div style="display: flex; align-items: center; gap: 0.5rem;">
         <span style="color: #94a3b8; font-size: 0.85rem;">Обновление:</span>
         <select id="refresh-interval" onchange="setRefresh(this.value)"
-            style="padding: 0.3rem 0.5rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem;">
+            style="padding: 0.3rem 0.5rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem; width: auto; margin: 0;">
             <option value="0">выкл</option>
             <option value="5">5 сек</option>
             <option value="10">10 сек</option>
@@ -33,199 +21,92 @@
     </div>
 </div>
 
-{{range .Users}}
-<div class="card" data-user-id="{{.ID}}">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
-        <div>
-            <strong style="font-size: 1.1rem;">{{.Username}}</strong>
-            <span style="color: #94a3b8; margin-left: 0.5rem;">{{.Email}}</span>
-            {{if .IsAdmin}}<span class="badge badge-green">admin</span>{{end}}
-            {{if not .IsActive}}<span class="badge badge-red">blocked</span>{{end}}
-            {{if .EmailVerified}}
-                <span class="badge badge-green">✉ verified</span>
-            {{else}}
-                <span class="badge badge-red">✉ не подтверждён</span>
-            {{end}}
-            {{if gt .OnlineCount 0}}
-                <span class="badge badge-green" data-stat="user-online">online ({{.OnlineCount}})</span>
-            {{else}}
-                <span class="badge badge-gray" data-stat="user-online">offline</span>
-            {{end}}
-        </div>
-        <div style="display: flex; gap: 1rem; align-items: center;">
-            <span class="stat" title="Профили (активные / всего)">📱 {{.ActiveCount}} / {{len .Profiles}}</span>
-            <span class="stat" data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</span>
-        </div>
+<div class="card" style="margin-bottom: 1rem; padding: 0.8rem;">
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <input type="search" id="user-search" placeholder="Поиск по логину или email…" autocomplete="off"
+               style="flex: 1; margin: 0;">
+        <span id="user-search-count" style="color: #94a3b8; font-size: 0.85rem; min-width: 80px; text-align: right;"></span>
     </div>
+</div>
 
-    <!-- Баланс и пополнение -->
-    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.8rem; padding: 0.5rem; background: #0f172a; border-radius: 6px;">
-        <span style="color: #94a3b8; font-size: 0.85rem;">Баланс:</span>
-        <strong data-stat="user-balance">{{formatBytes .TrafficBalance}}</strong>
-        <form method="POST" action="/admin/users/{{.ID}}/balance" style="display: flex; gap: 0.3rem; align-items: center; margin-left: auto;">
-            <input type="number" name="add_gb" step="0.5" min="0.5" value="5" placeholder="ГБ"
-                style="width: 70px; padding: 0.2rem 0.4rem; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem;">
-            <span style="color: #94a3b8; font-size: 0.8rem;">GB</span>
-            <button type="submit" class="btn btn-sm btn-primary">Пополнить</button>
-        </form>
-    </div>
-
-    {{if .Profiles}}
-    <table>
+<div class="card" style="padding: 0;">
+    <table style="margin: 0;">
         <tr>
-            <th>Профиль</th>
+            <th>Пользователь</th>
             <th>Статус</th>
-            <th>Трафик</th>
-            <th>Лимит</th>
-            <th>Действия</th>
+            <th>Онлайн</th>
+            <th>Профили</th>
+            <th title="Сумма traffic_up + traffic_down по профилям юзера. Сбрасывается кнопкой «Сброс» у профиля.">Σ по профилям</th>
+            <th>Баланс</th>
+            <th>Подписка</th>
+            <th style="text-align: right;">Действия</th>
         </tr>
-        {{range .Profiles}}
-        <tr data-profile-id="{{.ID}}">
+        {{range .Users}}
+        <tr data-user-id="{{.ID}}"
+            data-search="{{.Username}} {{.Email}}">
             <td>
-                <strong>{{.Name}}</strong>
-                <div style="font-size: 0.7rem; color: #64748b; font-family: monospace;">{{.UUID}}</div>
+                <a href="/admin/users/{{.ID}}" style="color: #e2e8f0; text-decoration: none;">
+                    <strong>{{.Username}}</strong>
+                </a>
+                <div style="font-size: 0.78rem; color: #94a3b8;">{{.Email}}</div>
             </td>
             <td>
-                {{if .IsActive}}
-                    {{if .IsOnline}}
-                        <span class="badge badge-green" data-stat="profile-status">● online</span>
-                        <span data-stat="profile-ips">{{range .OnlineIPs}}<span class="badge badge-blue">{{.}}</span> {{end}}</span>
-                    {{else}}
-                        <span class="badge badge-blue" data-stat="profile-status">active</span>
-                        <span data-stat="profile-ips"></span>
-                    {{end}}
+                {{if .IsAdmin}}<span class="badge badge-green">admin</span>{{end}}
+                {{if not .IsActive}}
+                    <span class="badge badge-red">blocked</span>
+                {{end}}
+                {{if .EmailVerified}}
+                    <span class="badge badge-green" title="Email подтверждён">✉</span>
                 {{else}}
-                    <span class="badge badge-red" data-stat="profile-status">disabled</span>
-                    <span data-stat="profile-ips"></span>
+                    <span class="badge badge-red" title="Email не подтверждён">✉</span>
                 {{end}}
             </td>
             <td>
-                <span class="stat" data-stat="profile-traffic">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
+                {{if gt .OnlineCount 0}}
+                    <span class="badge badge-green" data-stat="user-online">online ({{.OnlineCount}})</span>
+                {{else}}
+                    <span class="badge badge-gray" data-stat="user-online">offline</span>
+                {{end}}
             </td>
+            <td title="активных / всего">{{.ActiveCount}} / {{len .Profiles}}</td>
+            <td data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</td>
+            <td data-stat="user-balance">{{formatBytes .TotalAvailable}}</td>
             <td>
-                <form method="POST" action="/admin/profiles/{{.ID}}/limit" style="display: flex; gap: 0.3rem; align-items: center;">
-                    <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
-                        style="width: 70px; padding: 0.2rem 0.4rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem;">
-                    <span style="color: #94a3b8; font-size: 0.8rem;">GB</span>
-                    <button type="submit" class="btn btn-sm btn-primary">OK</button>
-                </form>
-            </td>
-            <td>
-                <div style="display: flex; gap: 0.3rem;">
-                    {{if .IsActive}}
-                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle">
-                        <input type="hidden" name="action" value="deactivate">
-                        <button type="submit" class="btn btn-sm btn-danger">Откл</button>
-                    </form>
-                    {{else}}
-                    <form method="POST" action="/admin/profiles/{{.ID}}/toggle">
-                        <input type="hidden" name="action" value="activate">
-                        <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
-                    </form>
+                {{if .TariffLabel}}
+                    {{.TariffLabel}}
+                    {{if and .TariffExpiresAt (gt .DaysLeft 0)}}
+                        <span style="color: #94a3b8; font-size: 0.8rem;">· {{.DaysLeft}} дн.</span>
+                    {{else if .TariffExpiresAt}}
+                        <span class="badge badge-red">истёк</span>
                     {{end}}
-                    <form method="POST" action="/admin/profiles/{{.ID}}/reset" onclick="return confirm('Сбросить трафик?')">
-                        <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Сброс</button>
-                    </form>
+                {{else}}
+                    <span style="color: #64748b;">—</span>
+                {{end}}
+            </td>
+            <td style="text-align: right;">
+                <div style="display: inline-flex; gap: 0.3rem;">
+                    {{if ne .ID $.User.ID}}
+                        {{if .IsActive}}
+                        <form method="POST" action="/admin/users/{{.ID}}/toggle"
+                              onsubmit="return confirm('Выключить пользователя {{.Username}}?');">
+                            <input type="hidden" name="action" value="deactivate">
+                            <button type="submit" class="btn btn-sm btn-danger" title="Выключить учётку">Выкл</button>
+                        </form>
+                        {{else}}
+                        <form method="POST" action="/admin/users/{{.ID}}/toggle">
+                            <input type="hidden" name="action" value="activate">
+                            <button type="submit" class="btn btn-sm btn-primary" title="Включить учётку">Вкл</button>
+                        </form>
+                        {{end}}
+                    {{end}}
+                    <a href="/admin/users/{{.ID}}" class="btn btn-sm btn-primary">Открыть</a>
                 </div>
             </td>
         </tr>
         {{end}}
     </table>
-    {{else}}
-    <p style="color: #64748b;">Нет профилей</p>
-    {{end}}
 </div>
-{{end}}
-<script>
-let timer = null;
-let countdown = null;
-let remaining = 0;
 
-function refreshStats() {
-    fetch('/admin/stats')
-        .then(r => r.json())
-        .then(users => {
-            users.forEach(u => {
-                const card = document.querySelector(`[data-user-id="${u.user_id}"]`);
-                if (!card) return;
-
-                const userOnline = card.querySelector('[data-stat="user-online"]');
-                if (userOnline) {
-                    if (u.online_count > 0) {
-                        userOnline.className = 'badge badge-green';
-                        userOnline.textContent = 'online (' + u.online_count + ')';
-                    } else {
-                        userOnline.className = 'badge badge-gray';
-                        userOnline.textContent = 'offline';
-                    }
-                }
-
-                const userTotal = card.querySelector('[data-stat="user-total"]');
-                if (userTotal) userTotal.textContent = 'Σ ' + u.total_traffic_fmt;
-
-                const userBalance = card.querySelector('[data-stat="user-balance"]');
-                if (userBalance && u.balance_fmt) userBalance.textContent = u.balance_fmt;
-
-                (u.profiles || []).forEach(p => {
-                    const row = card.querySelector(`[data-profile-id="${p.id}"]`);
-                    if (!row) return;
-
-                    const status = row.querySelector('[data-stat="profile-status"]');
-                    const ipsEl = row.querySelector('[data-stat="profile-ips"]');
-                    const traffic = row.querySelector('[data-stat="profile-traffic"]');
-
-                    if (status) {
-                        if (status.textContent.trim() === 'disabled') {
-                        } else if (p.is_online) {
-                            status.className = 'badge badge-green';
-                            status.textContent = '● online';
-                        } else {
-                            status.className = 'badge badge-blue';
-                            status.textContent = 'active';
-                        }
-                    }
-
-                    if (ipsEl) {
-                        const ips = p.online_ips || [];
-                        if (p.is_online && ips.length > 0) {
-                            ipsEl.innerHTML = ips.map(ip => '<span class="badge badge-blue">' + ip + '</span> ').join('');
-                        } else {
-                            ipsEl.innerHTML = '';
-                        }
-                    }
-
-                    if (traffic) traffic.textContent = '↑' + p.traffic_up_fmt + ' ↓' + p.traffic_down_fmt;
-                });
-            });
-        })
-        .catch(() => {});
-}
-
-function setRefresh(sec) {
-    clearInterval(timer);
-    clearInterval(countdown);
-    localStorage.setItem('admin-refresh', sec);
-    sec = parseInt(sec);
-    if (sec === 0) {
-        document.getElementById('refresh-countdown').textContent = '';
-        return;
-    }
-    remaining = sec;
-    updateCountdown();
-    countdown = setInterval(updateCountdown, 1000);
-    timer = setInterval(refreshStats, sec * 1000);
-}
-
-function updateCountdown() {
-    document.getElementById('refresh-countdown').textContent = remaining + 'с';
-    remaining--;
-    if (remaining < 0) remaining = parseInt(document.getElementById('refresh-interval').value);
-}
-
-(function() {
-    const saved = localStorage.getItem('admin-refresh') || '30';
-    document.getElementById('refresh-interval').value = saved;
-    setRefresh(saved);
-})();
-</script>
+<script src="/static/js/admin-search.js?v={{assetVersion}}" defer></script>
+<script src="/static/js/admin.js?v={{assetVersion}}" defer></script>
 {{end}}

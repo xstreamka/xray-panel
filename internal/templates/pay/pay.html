@@ -2,18 +2,6 @@
 
 {{define "title"}}Пополнение — VPN Panel{{end}}
 
-{{define "nav"}}
-<nav>
-    <span class="brand">VPN Panel</span>
-    <div>
-        <span style="color: #e2e8f0;">{{.User.Username}}</span>
-        {{if .User.IsAdmin}}<a href="/admin">Админка</a>{{end}}
-        <a href="/dashboard">Dashboard</a>
-        <a href="/logout">Выход</a>
-    </div>
-</nav>
-{{end}}
-
 {{define "content"}}
 
 {{if eq .Status "success"}}
@@ -40,18 +28,52 @@
 </div>
 {{end}}
 
-<h1 style="margin: 1.5rem 0;">Пополнить баланс</h1>
+<h1 style="margin: 1.5rem 0;">Оплата подписки</h1>
 
-<div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-    <div>
-        <span style="color: #94a3b8;">Текущий баланс:</span>
-        <strong style="font-size: 1.3rem; margin-left: 0.5rem;">{{formatBytes .User.TrafficBalance}}</strong>
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.8rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+            <span style="color: #94a3b8; font-size: 0.9rem;">Подписка:</span>
+            {{if .HasActiveSub}}
+                <span class="badge badge-green">активна до {{.User.TariffExpiresAt.Format "02.01.2006"}}</span>
+            {{else}}
+                <span class="badge badge-gray">не активна</span>
+            {{end}}
+        </div>
+        <a href="/dashboard" style="color: #38bdf8; text-decoration: none; font-size: 0.9rem;">← В панель</a>
     </div>
-    <a href="/dashboard" style="color: #38bdf8; text-decoration: none;">← Вернуться</a>
+
+    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; padding-top: 0.8rem; border-top: 1px solid #334155;">
+        <div>
+            <div style="color: #94a3b8; font-size: 0.8rem;">Базовый трафик</div>
+            <strong style="font-size: 1.15rem;">{{formatBytes .BaseRemaining}}</strong>
+            <span style="color: #64748b; font-size: 0.85rem;">/ {{formatBytes .User.BaseTrafficLimit}}</span>
+        </div>
+        <div>
+            <div style="color: #94a3b8; font-size: 0.8rem;">Докупленный</div>
+            <strong style="font-size: 1.15rem; color: {{if gt .User.ExtraTrafficBalance 0}}#fcd34d{{else}}#64748b{{end}};">
+                {{formatBytes .User.ExtraTrafficBalance}}
+            </strong>
+        </div>
+        {{if gt .User.FrozenExtraBalance 0}}
+        <div title="Трафик заморожен и вернётся при следующей оплате подписки">
+            <div style="color: #94a3b8; font-size: 0.8rem;">❄ Заморожено</div>
+            <strong style="font-size: 1.15rem; color: #60a5fa;">{{formatBytes .User.FrozenExtraBalance}}</strong>
+        </div>
+        {{end}}
+        <div style="margin-left: auto;">
+            <div style="color: #94a3b8; font-size: 0.8rem;">Всего доступно</div>
+            <strong style="font-size: 1.3rem;">{{formatBytes .User.TotalAvailable}}</strong>
+        </div>
+    </div>
 </div>
 
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 1rem;">
-    {{range .Tariffs}}
+<h2 style="margin-top: 2rem; margin-bottom: 0.8rem; font-size: 1.3rem;">Подписка на месяц</h2>
+<p style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 1rem;">
+    Каждая оплата сбрасывает базовый трафик до лимита тарифа и продлевает доступ. Остаток купленной «докупки» переносится.
+</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+    {{range .SubPlans}}
     <form method="POST" action="/pay/checkout" style="margin: 0;">
         <input type="hidden" name="plan_id" value="{{.Code}}">
         <div class="card" style="position: relative; text-align: center; margin: 0; {{if .IsPopular}}border: 1px solid #3b82f6;{{end}}">
@@ -64,7 +86,7 @@
                 {{.Label}}
             </div>
             <div style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 1rem;">
-                без срока годности
+                на {{.DurationDays}} дн.
             </div>
             <div style="font-size: 1.8rem; font-weight: bold; margin-bottom: 1rem;">
                 {{printf "%.0f" .AmountRub}} <span style="color: #94a3b8; font-size: 1rem;">₽</span>
@@ -75,7 +97,42 @@
     {{end}}
 </div>
 
-<div class="card" style="margin-top: 1rem; font-size: 0.85rem; color: #94a3b8;">
+{{if .AddonPlans}}
+<h2 style="margin-top: 2rem; margin-bottom: 0.8rem; font-size: 1.3rem;">Докупить трафик</h2>
+<p style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 1rem;">
+    {{if .HasActiveSub}}
+        Если не хватило до конца месяца — докупка не меняет дату окончания, просто добавляет ГБ сверху.
+    {{else}}
+        Докупка доступна только при активной подписке — сначала оплатите тариф.
+    {{end}}
+</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+    {{range .AddonPlans}}
+    <form method="POST" action="/pay/checkout" style="margin: 0;">
+        <input type="hidden" name="plan_id" value="{{.Code}}">
+        <div class="card" style="position: relative; text-align: center; margin: 0; opacity: {{if $.HasActiveSub}}1{{else}}0.55{{end}}; {{if .IsPopular}}border: 1px solid #3b82f6;{{end}}">
+            {{if .IsPopular}}
+                <div style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: #3b82f6; color: white; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem;">
+                    Популярный
+                </div>
+            {{end}}
+            <div style="font-size: 1.6rem; font-weight: bold; color: #fcd34d; margin-bottom: 0.3rem;">
+                {{.Label}}
+            </div>
+            <div style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 1rem;">
+                к активной подписке
+            </div>
+            <div style="font-size: 1.5rem; font-weight: bold; margin-bottom: 1rem;">
+                {{printf "%.0f" .AmountRub}} <span style="color: #94a3b8; font-size: 1rem;">₽</span>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;" {{if not $.HasActiveSub}}disabled{{end}}>Купить</button>
+        </div>
+    </form>
+    {{end}}
+</div>
+{{end}}
+
+<div class="card" style="margin-top: 1.5rem; font-size: 0.85rem; color: #94a3b8;">
     <p style="margin-bottom: 0.5rem;">💳 Оплата через защищённую систему <strong style="color: #e2e8f0;">Робокасса</strong>. Данные карты не хранятся на нашем сервере.</p>
     <p>После оплаты ГБ будут зачислены автоматически в течение минуты.</p>
 </div>

@@ -25,6 +25,13 @@ type VPNProfile struct {
 	Username string `json:"username,omitempty"`
 }
 
+// ──────────────────────────────────────────────
+//  SQL-колонки profile — единый список, чтобы новые поля (например,
+//  limit_notified_at) не тянули за собой правку каждого SELECT-а. На чтение
+//  НЕ включаем limit_notified_at: он нужен только для idempotency-апдейтов
+//  (TryMarkLimitNotified) и не участвует в UI/API.
+// ──────────────────────────────────────────────
+
 type VPNProfileStore struct {
 	pool *pgxpool.Pool
 }
@@ -114,9 +121,17 @@ func (s *VPNProfileStore) UpdateTraffic(ctx context.Context, uuid string, up, do
 	return err
 }
 
+// SetActive меняет is_active на профиле. При активации сбрасывает
+// limit_notified_at, чтобы следующее превышение personal-лимита снова
+// отправило уведомление (аналогично тому, как пополнение баланса сбрасывает
+// block_notified_at у юзера).
 func (s *VPNProfileStore) SetActive(ctx context.Context, id int, active bool) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE vpn_profiles SET is_active = $1, updated_at = NOW() WHERE id = $2`,
+		`UPDATE vpn_profiles
+		 SET is_active         = $1,
+		     limit_notified_at = CASE WHEN $1 THEN NULL ELSE limit_notified_at END,
+		     updated_at        = NOW()
+		 WHERE id = $2`,
 		active, id,
 	)
 	return err
@@ -133,20 +148,28 @@ func (s *VPNProfileStore) Delete(ctx context.Context, id int) (string, error) {
 	return uuid, nil
 }
 
-// GetAllActiveUUIDs — для восстановления пользователей при старте Xray
+// GetAllActiveUUIDs — UUID профилей, которые должны быть ВКЛЮЧЕНЫ в Xray.
+//
+// Условия активности:
+//   - profile.is_active = TRUE
+//   - user.is_active = TRUE
+//   - expires_at NULL или в будущем
+//   - у юзера есть доступный трафик: (base_limit - base_used) + extra > 0
+//   - если у профиля задан personal limit (traffic_limit > 0) — не превышен
 func (s *VPNProfileStore) GetAllActiveUUIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT vp.uuid FROM vpn_profiles vp
-		 JOIN users u ON u.id = vp.user_id
-		 WHERE vp.is_active = TRUE AND u.is_active = TRUE
-		   AND (vp.expires_at IS NULL OR vp.expires_at > NOW())
-		   AND (vp.traffic_limit = 0 OR vp.traffic_up + vp.traffic_down < vp.traffic_limit)`,
+		`SELECT p.uuid FROM vpn_profiles p
+		 JOIN users u ON u.id = p.user_id
+		 WHERE p.is_active = TRUE
+		   AND u.is_active = TRUE
+		   AND (p.expires_at IS NULL OR p.expires_at > NOW())
+		   AND (u.base_traffic_limit - u.base_traffic_used) + u.extra_traffic_balance > 0
+		   AND (p.traffic_limit = 0 OR p.traffic_up + p.traffic_down < p.traffic_limit)`,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var uuids []string
 	for rows.Next() {
 		var uuid string
@@ -158,21 +181,22 @@ func (s *VPNProfileStore) GetAllActiveUUIDs(ctx context.Context) ([]string, erro
 	return uuids, nil
 }
 
-// GetAllInactiveUUIDs — UUID профилей, которые НЕ должны быть активны в Xray
+// GetAllInactiveUUIDs — UUID профилей, которые должны быть ОТКЛЮЧЕНЫ.
+// Симметрично GetAllActiveUUIDs, для sync при старте Xray.
 func (s *VPNProfileStore) GetAllInactiveUUIDs(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT vp.uuid FROM vpn_profiles vp
-		 JOIN users u ON u.id = vp.user_id
-		 WHERE vp.is_active = FALSE
+		`SELECT p.uuid FROM vpn_profiles p
+		 JOIN users u ON u.id = p.user_id
+		 WHERE p.is_active = FALSE
 		    OR u.is_active = FALSE
-		    OR (vp.expires_at IS NOT NULL AND vp.expires_at <= NOW())
-		    OR (vp.traffic_limit > 0 AND vp.traffic_up + vp.traffic_down >= vp.traffic_limit)`,
+		    OR (p.expires_at IS NOT NULL AND p.expires_at <= NOW())
+		    OR (u.base_traffic_limit - u.base_traffic_used) + u.extra_traffic_balance <= 0
+		    OR (p.traffic_limit > 0 AND p.traffic_up + p.traffic_down >= p.traffic_limit)`,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var uuids []string
 	for rows.Next() {
 		var uuid string
@@ -184,27 +208,33 @@ func (s *VPNProfileStore) GetAllInactiveUUIDs(ctx context.Context) ([]string, er
 	return uuids, nil
 }
 
-// GetExceeded — активные профили, превысившие лимит или с истёкшим сроком
+// GetExceeded переработан. Теперь возвращает профили, которые СЕЙЧАС активны
+// в БД, но должны быть отключены. Используется stats.go для выявления того,
+// кого пора вырубить через gRPC.
 func (s *VPNProfileStore) GetExceeded(ctx context.Context) ([]VPNProfile, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT p.id, p.user_id, p.uuid, p.name, p.is_active, p.traffic_up, p.traffic_down, p.traffic_limit, p.expires_at, p.created_at, p.updated_at
+		`SELECT p.id, p.user_id, p.uuid, p.name, p.is_active,
+		        p.traffic_up, p.traffic_down, p.traffic_limit, p.expires_at,
+		        p.created_at, p.updated_at
 		 FROM vpn_profiles p
+		 JOIN users u ON u.id = p.user_id
 		 WHERE p.is_active = TRUE
 		   AND (
-		     (p.traffic_limit > 0 AND p.traffic_up + p.traffic_down >= p.traffic_limit)
-		     OR
 		     (p.expires_at IS NOT NULL AND p.expires_at <= NOW())
+		     OR (u.base_traffic_limit - u.base_traffic_used) + u.extra_traffic_balance <= 0
+		     OR (p.traffic_limit > 0 AND p.traffic_up + p.traffic_down >= p.traffic_limit)
 		   )`,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var profiles []VPNProfile
 	for rows.Next() {
 		var p VPNProfile
-		if err := rows.Scan(&p.ID, &p.UserID, &p.UUID, &p.Name, &p.IsActive, &p.TrafficUp, &p.TrafficDown, &p.TrafficLimit, &p.ExpiresAt, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.UserID, &p.UUID, &p.Name, &p.IsActive,
+			&p.TrafficUp, &p.TrafficDown, &p.TrafficLimit, &p.ExpiresAt,
+			&p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		profiles = append(profiles, p)
@@ -224,17 +254,105 @@ func (s *VPNProfileStore) GetByID(ctx context.Context, id int) (*VPNProfile, err
 	return p, nil
 }
 
+// SetLimit меняет personal-лимит профиля. Сбрасывает limit_notified_at —
+// это новый цикл потребления, и если юзер задал больший лимит (или 0 =
+// безлимит), письмо об исчерпании должно прийти снова при следующем
+// превышении, а не замалчиваться прошлой отметкой.
 func (s *VPNProfileStore) SetLimit(ctx context.Context, id int, limitBytes int64) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE vpn_profiles SET traffic_limit = $1, updated_at = NOW() WHERE id = $2`,
+		`UPDATE vpn_profiles
+		 SET traffic_limit     = $1,
+		     limit_notified_at = NULL,
+		     updated_at        = NOW()
+		 WHERE id = $2`,
 		limitBytes, id,
 	)
 	return err
 }
 
+// ResetTraffic обнуляет персональные счётчики. Сбрасывает limit_notified_at:
+// после сброса трафика цикл начинается заново, письмо об исчерпании
+// personal-лимита должно прийти снова, когда юзер опять его выберет.
 func (s *VPNProfileStore) ResetTraffic(ctx context.Context, id int) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE vpn_profiles SET traffic_up = 0, traffic_down = 0, updated_at = NOW() WHERE id = $1`, id,
+		`UPDATE vpn_profiles
+		 SET traffic_up        = 0,
+		     traffic_down      = 0,
+		     limit_notified_at = NULL,
+		     updated_at        = NOW()
+		 WHERE id = $1`, id,
 	)
 	return err
+}
+
+// TryMarkLimitNotified атомарно ставит limit_notified_at = NOW(), если он
+// ещё NULL, и возвращает true. Если отметка уже стоит — возвращает false,
+// и вызывающий код пропускает отправку письма. Сбрасывается при SetLimit,
+// ResetTraffic, SetActive(true) и ReactivateAllByUser — аналог поведения
+// TryMarkBlockNotified на уровне юзера.
+func (s *VPNProfileStore) TryMarkLimitNotified(ctx context.Context, id int) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE vpn_profiles SET limit_notified_at = NOW(), updated_at = NOW()
+		 WHERE id = $1 AND limit_notified_at IS NULL`,
+		id,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// DeactivateAllByUser помечает все активные профили юзера как inactive в БД.
+// Это не отключает их в Xray — отключение gRPC-вызовом делает stats-коллектор.
+// Возвращает список UUID, которые были отключены.
+func (s *VPNProfileStore) DeactivateAllByUser(ctx context.Context, userID int) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`UPDATE vpn_profiles SET is_active = FALSE, updated_at = NOW()
+		 WHERE user_id = $1 AND is_active = TRUE
+		 RETURNING uuid`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var uuids []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			return nil, err
+		}
+		uuids = append(uuids, uuid)
+	}
+	return uuids, nil
+}
+
+// ReactivateAllByUser включает все профили юзера (после успешного продления).
+// Сбрасывает их персональные счётчики? — НЕТ. traffic_up/down считаются кумулятивно
+// за всё время жизни профиля, сброс только через админку вручную.
+// Сбрасывает limit_notified_at: после реактивации следующий цикл превышения
+// personal-лимита должен снова отправить уведомление.
+func (s *VPNProfileStore) ReactivateAllByUser(ctx context.Context, userID int) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`UPDATE vpn_profiles
+		 SET is_active         = TRUE,
+		     limit_notified_at = NULL,
+		     updated_at        = NOW()
+		 WHERE user_id = $1 AND is_active = FALSE
+		 RETURNING uuid`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var uuids []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			return nil, err
+		}
+		uuids = append(uuids, uuid)
+	}
+	return uuids, nil
 }

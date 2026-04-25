@@ -1,50 +1,88 @@
 {{template "base" .}}
 
-{{define "title"}}История пополнений — VPN Panel{{end}}
-
-{{define "nav"}}
-<nav>
-    <span class="brand">VPN Panel</span>
-    <div>
-        <span style="color: #e2e8f0;">{{.User.Username}}</span>
-        {{if .User.IsAdmin}}<a href="/admin">Админка</a>{{end}}
-        <a href="/dashboard">Dashboard</a>
-        <a href="/pay">Пополнить</a>
-        <a href="/logout">Выход</a>
-    </div>
-</nav>
-{{end}}
+{{define "title"}}История платежей — VPN Panel{{end}}
 
 {{define "content"}}
 <div class="card" style="display: flex; justify-content: space-between; align-items: center;">
-    <h2 style="margin: 0;">История пополнений</h2>
-    <a href="/dashboard" style="color: #38bdf8; text-decoration: none;">← Вернуться</a>
+    <h2 style="margin: 0;">История платежей</h2>
+    <a href="/dashboard" style="color: #38bdf8; text-decoration: none;">← В панель</a>
 </div>
 
 {{if .Receipts}}
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.8rem; margin: 1rem 0;">
+    <div class="card" style="margin: 0;">
+        <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.3rem;">Всего заказов</div>
+        <strong style="font-size: 1.5rem;">{{.TotalCount}}</strong>
+        <span style="color: #94a3b8; font-size: 0.85rem; margin-left: 0.5rem;">на {{printf "%.2f" .TotalRub}} ₽</span>
+    </div>
+    <div class="card" style="margin: 0; border-left: 3px solid #3b82f6;">
+        <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.3rem;">
+            <span class="badge badge-blue">Подписка</span>
+        </div>
+        <strong style="font-size: 1.5rem;">× {{.SubCount}}</strong>
+        <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.2rem;">
+            {{formatBytes .SubBytes}} · {{printf "%.2f" .SubRub}} ₽
+        </div>
+    </div>
+    <div class="card" style="margin: 0; border-left: 3px solid #fcd34d;">
+        <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.3rem;">
+            <span class="badge badge-yellow">Докупка</span>
+        </div>
+        <strong style="font-size: 1.5rem;">× {{.AddonCount}}</strong>
+        <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.2rem;">
+            {{formatBytes .AddonBytes}} · {{printf "%.2f" .AddonRub}} ₽
+        </div>
+    </div>
+</div>
+
 <div class="card">
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap;">
+        <button type="button" class="btn btn-sm btn-primary" data-filter="all" onclick="setFilter(this)">Все</button>
+        <button type="button" class="btn btn-sm" data-filter="subscription" onclick="setFilter(this)" style="background: #334155; color: #e2e8f0;">Только подписки</button>
+        <button type="button" class="btn btn-sm" data-filter="addon" onclick="setFilter(this)" style="background: #334155; color: #e2e8f0;">Только докупки</button>
+    </div>
+
     <table>
         <thead>
             <tr>
-                <th>Дата</th>
-                <th>Заказ</th>
+                <th style="width: 150px;">Дата</th>
+                <th style="width: 120px;">Тип</th>
                 <th>Тариф</th>
-                <th style="text-align: right;">Зачислено</th>
-                <th style="text-align: right;">Сумма</th>
+                <th style="width: 100px;">Заказ</th>
+                <th style="text-align: right; width: 140px;">Начислено</th>
+                <th style="text-align: right; width: 100px;">Сумма</th>
             </tr>
         </thead>
         <tbody>
         {{range .Receipts}}
-            <tr>
+            <tr data-kind="{{.TariffKind}}">
                 <td style="color: #94a3b8; white-space: nowrap;">
-                    {{.PaidAt.Format "02.01.2006 15:04"}}
+                    {{.PaidAt.Format "02.01.2006"}}
+                    <div style="color: #64748b; font-size: 0.8rem;">{{.PaidAt.Format "15:04"}}</div>
+                </td>
+                <td>
+                    {{if eq (printf "%s" .TariffKind) "subscription"}}
+                        <span class="badge badge-blue">Подписка</span>
+                    {{else if eq (printf "%s" .TariffKind) "addon"}}
+                        <span class="badge badge-yellow">Докупка</span>
+                    {{else}}
+                        <span class="badge badge-gray">—</span>
+                    {{end}}
+                </td>
+                <td>
+                    {{with index $.Labels .PlanID}}
+                        <strong>{{.}}</strong>
+                    {{else}}
+                        <span style="color: #94a3b8;">{{$.PlanIDFallback}}</span>
+                    {{end}}
+                    <div style="color: #64748b; font-size: 0.75rem; font-family: monospace;">{{.PlanID}}</div>
                 </td>
                 <td style="font-family: monospace; color: #64748b;">№{{.InvID}}</td>
-                <td><span class="badge badge-blue">{{.PlanID}}</span></td>
-                <td style="text-align: right; color: #22c55e; font-weight: 600;">
+                <td style="text-align: right; color: #22c55e; font-weight: 600; white-space: nowrap;">
                     +{{formatBytes .TrafficBytes}}
                 </td>
-                <td style="text-align: right; font-weight: 600;">
+                <td style="text-align: right; font-weight: 600; white-space: nowrap;">
                     {{printf "%.2f" .AmountRub}} ₽
                 </td>
             </tr>
@@ -55,9 +93,11 @@
 {{else}}
 <div class="card" style="text-align: center; padding: 3rem 1rem;">
     <p style="color: #94a3b8; margin-bottom: 1rem;">
-        Пока нет ни одного пополнения.
+        Пока нет ни одного платежа.
     </p>
-    <a href="/pay" class="btn btn-primary">Пополнить баланс</a>
+    <a href="/pay" class="btn btn-primary">Оформить подписку</a>
 </div>
 {{end}}
+
+<script src="/static/js/payments-history.js?v={{assetVersion}}"></script>
 {{end}}

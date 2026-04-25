@@ -1,0 +1,87 @@
+{{template "base" .}}
+
+{{define "title"}}Настройки — VPN Panel{{end}}
+
+{{define "content"}}
+<h1 style="margin: 1.5rem 0;">Настройки</h1>
+
+<div class="card">
+    <h3 style="margin-bottom: 0.5rem;">Уведомления на почту</h3>
+    <p style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 1rem;">
+        Включите только те письма, которые хотите получать. Системные письма
+        (подтверждение email, восстановление пароля) приходят всегда — без них
+        нельзя подтвердить владение ящиком или восстановить доступ.
+    </p>
+
+    {{if .Success}}
+    <div style="background: #14532d; color: #86efac; padding: 0.6rem 0.8rem; border-radius: 6px; margin-bottom: 1rem;">
+        {{.Success}}
+    </div>
+    {{end}}
+
+    <form method="POST" action="/settings">
+        <div style="display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 1rem;">
+            <label style="display: flex; gap: 0.6rem; align-items: flex-start; margin: 0; color: #e2e8f0; font-size: 0.95rem; cursor: pointer;">
+                <input type="checkbox" name="notify_topup" {{if .User.NotifyTopup}}checked{{end}} style="margin-top: 0.25rem;">
+                <span>
+                    <strong>Оплата зачислена</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.15rem;">
+                        Письмо сразу после успешной оплаты с деталями: сколько ГБ начислено и на какую сумму.
+                    </div>
+                </span>
+            </label>
+
+            <label style="display: flex; gap: 0.6rem; align-items: flex-start; margin: 0; color: #e2e8f0; font-size: 0.95rem; cursor: pointer;">
+                <input type="checkbox" name="notify_expiration" {{if .User.NotifyExpiration}}checked{{end}} style="margin-top: 0.25rem;">
+                <span>
+                    <strong>Подписка скоро закончится</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.15rem;">
+                        Напоминания за 5 дней и за 1 день до окончания срока подписки.
+                    </div>
+                </span>
+            </label>
+
+            <label style="display: flex; gap: 0.6rem; align-items: flex-start; margin: 0; color: #e2e8f0; font-size: 0.95rem; cursor: pointer;">
+                <input type="checkbox" name="notify_traffic_low" {{if .User.NotifyTrafficLow}}checked{{end}} style="margin-top: 0.25rem;">
+                <span>
+                    <strong>Скоро закончится трафик</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.15rem;">
+                        Предупреждение, когда на балансе осталось не более 1 ГБ. Приходит один раз за цикл подписки.
+                    </div>
+                </span>
+            </label>
+
+            <label style="display: flex; gap: 0.6rem; align-items: flex-start; margin: 0; color: #e2e8f0; font-size: 0.95rem; cursor: pointer;">
+                <input type="checkbox" name="notify_block" {{if .User.NotifyBlock}}checked{{end}} style="margin-top: 0.25rem;">
+                <span>
+                    <strong>VPN отключён</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.15rem;">
+                        Уведомление, что профили отключены — из-за исчерпанного трафика или истечения подписки.
+                    </div>
+                </span>
+            </label>
+
+            <label style="display: flex; gap: 0.6rem; align-items: flex-start; margin: 0; color: #e2e8f0; font-size: 0.95rem; cursor: pointer;">
+                <input type="checkbox" name="notify_profile_limit" {{if .User.NotifyProfileLimit}}checked{{end}} style="margin-top: 0.25rem;">
+                <span>
+                    <strong>Лимит профиля исчерпан</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.15rem;">
+                        Уведомление, когда один из ваших профилей достиг установленного вами
+                        личного лимита и был отключён. Остальные профили и подписка продолжают работать.
+                    </div>
+                </span>
+            </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3 style="margin-bottom: 0.5rem;">Аккаунт</h3>
+    <div style="display: flex; gap: 2rem; flex-wrap: wrap; color: #94a3b8; font-size: 0.9rem;">
+        <div><span style="color: #64748b;">Логин:</span> <strong style="color: #e2e8f0;">{{.User.Username}}</strong></div>
+        <div><span style="color: #64748b;">Email:</span> <strong style="color: #e2e8f0;">{{.User.Email}}</strong></div>
+    </div>
+</div>
+{{end}}

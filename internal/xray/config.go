@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 
 	"xray-panel/internal/config"
 )
@@ -29,6 +30,14 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 			"email": uuid,
 			"flow":  "xtls-rprx-vision",
 		})
+	}
+
+	// Порт VLESS-inbound'а. По умолчанию 443, но на локальной разработке,
+	// если :443 занят (например, хостовым nginx), можно выставить SERVER_PORT=444
+	// в .env — и Xray, и VLESS URI, и ss -K в firewall возьмут это значение.
+	inboundPort, err := strconv.Atoi(cfg.ServerPort)
+	if err != nil || inboundPort <= 0 || inboundPort > 65535 {
+		return fmt.Errorf("invalid SERVER_PORT %q: %w", cfg.ServerPort, err)
 	}
 
 	xrayConfig := map[string]any{
@@ -101,7 +110,7 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 			{
 				"tag":      cfg.XrayInboundTag, // "vless-in"
 				"listen":   "0.0.0.0",
-				"port":     443,
+				"port":     inboundPort,
 				"protocol": "vless",
 				"settings": map[string]any{
 					"clients":    clients,

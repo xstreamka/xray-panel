@@ -1,0 +1,138 @@
+{{template "base" .}}
+
+{{define "title"}}Инвайты — VPN Panel{{end}}
+
+{{define "content"}}
+<div style="display: flex; justify-content: space-between; align-items: center; margin: 1.5rem 0;">
+    <h1>Инвайты и режим регистрации</h1>
+</div>
+
+<div class="card" style="margin-bottom: 1rem;">
+    <h3 style="margin-top: 0;">Режим регистрации</h3>
+    <p style="color: #94a3b8; font-size: 0.9rem; margin-top: 0;">
+        Определяет, как новые пользователи могут зарегистрироваться в системе.
+    </p>
+    <form method="POST" action="/admin/settings/registration-mode">
+        <div style="display: flex; flex-direction: column; gap: 0.5rem; margin: 0.8rem 0;">
+            <label style="display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;">
+                <input type="radio" name="mode" value="{{.ModeOpen}}" {{if eq .Mode .ModeOpen}}checked{{end}} style="margin-top: 0.2rem;">
+                <div>
+                    <strong>Открытая</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem;">Любой может зарегистрироваться через форму.</div>
+                </div>
+            </label>
+            <label style="display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;">
+                <input type="radio" name="mode" value="{{.ModeInviteOnly}}" {{if eq .Mode .ModeInviteOnly}}checked{{end}} style="margin-top: 0.2rem;">
+                <div>
+                    <strong>Только по инвайтам</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem;">Регистрация возможна только по валидной ссылке-приглашению. Ссылка «Регистрация» на странице входа скрывается.</div>
+                </div>
+            </label>
+            <label style="display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;">
+                <input type="radio" name="mode" value="{{.ModeBoth}}" {{if eq .Mode .ModeBoth}}checked{{end}} style="margin-top: 0.2rem;">
+                <div>
+                    <strong>Оба способа</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem;">Открытая регистрация + учёт переходов по инвайтам, если юзер пришёл по ссылке.</div>
+                </div>
+            </label>
+            <label style="display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;">
+                <input type="radio" name="mode" value="{{.ModeDisabled}}" {{if eq .Mode .ModeDisabled}}checked{{end}} style="margin-top: 0.2rem;">
+                <div>
+                    <strong>Запрещена</strong>
+                    <div style="color: #94a3b8; font-size: 0.85rem;">Новые регистрации невозможны ни одним способом.</div>
+                </div>
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Сохранить режим</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom: 1rem;">
+    <h3 style="margin-top: 0;">Создать инвайт</h3>
+    <form method="POST" action="/admin/invites" style="display: flex; gap: 0.5rem; align-items: flex-end;">
+        <div style="flex: 1;">
+            <label for="note" style="margin-bottom: 0.3rem;">Заметка (необязательно)</label>
+            <input type="text" id="note" name="note" maxlength="255" placeholder="Например: друзья / реклама / канал X" style="margin-bottom: 0;">
+        </div>
+        <button type="submit" class="btn btn-primary">Создать</button>
+    </form>
+    <p style="color: #64748b; font-size: 0.8rem; margin-top: 0.6rem; margin-bottom: 0;">
+        Инвайты многоразовые и бессрочные. Отключить или удалить можно только вручную.
+    </p>
+</div>
+
+{{if .Invites}}
+<div class="card">
+    <h3 style="margin-top: 0;">Активные инвайты</h3>
+    <table>
+        <tr>
+            <th>Ссылка / код</th>
+            <th>Заметка</th>
+            <th>Автор</th>
+            <th title="Количество переходов по ссылке">Переходы</th>
+            <th title="Зарегистрировались по инвайту">Регистрации</th>
+            <th title="Из них с подтверждённым email">Verified</th>
+            <th>Статус</th>
+            <th>Создан</th>
+            <th>Действия</th>
+        </tr>
+        {{range .Invites}}
+        <tr {{if .IsDeleted}}style="opacity: 0.5; text-decoration: line-through;"{{end}}>
+            <td>
+                <div style="display: flex; gap: 0.3rem; align-items: center;">
+                    <code style="font-size: 0.75rem; background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 4px;">{{.Code}}</code>
+                    {{if not .IsDeleted}}
+                    <button type="button" class="btn btn-sm" style="background: #475569; color: white;"
+                            data-invite-link="{{$.BaseURL}}/register?invite={{.Code}}"
+                            title="Копировать ссылку">📋</button>
+                    {{end}}
+                </div>
+            </td>
+            <td style="font-size: 0.85rem; color: #cbd5e1;">{{if .Note}}{{.Note}}{{else}}—{{end}}</td>
+            <td style="font-size: 0.85rem;">{{if .CreatorLogin}}{{.CreatorLogin}}{{else}}<span style="color: #64748b;">—</span>{{end}}</td>
+            <td>{{.Clicks}}</td>
+            <td><a href="/admin/invites/{{.ID}}/users" style="color: #38bdf8;">{{.Registered}}</a></td>
+            <td>{{.Verified}}</td>
+            <td>
+                {{if .IsDeleted}}
+                    <span class="badge badge-red">удалён</span>
+                {{else if .IsActive}}
+                    <span class="badge badge-green">активен</span>
+                {{else}}
+                    <span class="badge badge-gray">выключен</span>
+                {{end}}
+            </td>
+            <td style="font-size: 0.8rem; color: #94a3b8;">{{.CreatedAt.Format "02.01.2006"}}</td>
+            <td>
+                {{if not .IsDeleted}}
+                <div style="display: flex; gap: 0.3rem;">
+                    {{if .IsActive}}
+                    <form method="POST" action="/admin/invites/{{.ID}}/toggle">
+                        <input type="hidden" name="action" value="deactivate">
+                        <button type="submit" class="btn btn-sm btn-danger">Выкл</button>
+                    </form>
+                    {{else}}
+                    <form method="POST" action="/admin/invites/{{.ID}}/toggle">
+                        <input type="hidden" name="action" value="activate">
+                        <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
+                    </form>
+                    {{end}}
+                    <form method="POST" action="/admin/invites/{{.ID}}/delete"
+                          onsubmit="return confirm('Удалить инвайт? Он станет недействительным, но останется в списке для сохранения связи с уже зарегистрированными пользователями.');">
+                        <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Удалить</button>
+                    </form>
+                </div>
+                {{end}}
+            </td>
+        </tr>
+        {{end}}
+    </table>
+</div>
+{{else}}
+<div class="card">
+    <p style="color: #94a3b8; margin: 0;">Инвайтов пока нет. Создайте первый выше.</p>
+</div>
+{{end}}
+
+<script src="/static/js/invites.js?v={{assetVersion}}" defer></script>
+{{end}}
