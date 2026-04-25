@@ -13,7 +13,7 @@
         Определяет, как новые пользователи могут зарегистрироваться в системе.
     </p>
     <form method="POST" action="/admin/settings/registration-mode">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
         <div style="display: flex; flex-direction: column; gap: 0.5rem; margin: 0.8rem 0;">
             <label style="display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;">
                 <input type="radio" name="mode" value="{{.ModeOpen}}" {{if eq .Mode .ModeOpen}}checked{{end}} style="margin-top: 0.2rem;">
@@ -51,7 +51,7 @@
 <div class="card" style="margin-bottom: 1rem;">
     <h3 style="margin-top: 0;">Создать инвайт</h3>
     <form method="POST" action="/admin/invites" style="display: flex; gap: 0.5rem; align-items: flex-end;">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
         <div style="flex: 1;">
             <label for="note" style="margin-bottom: 0.3rem;">Заметка (необязательно)</label>
             <input type="text" id="note" name="note" maxlength="255" placeholder="Например: друзья / реклама / канал X" style="margin-bottom: 0;">
@@ -110,20 +110,20 @@
                 <div style="display: flex; gap: 0.3rem;">
                     {{if .IsActive}}
                     <form method="POST" action="/admin/invites/{{.ID}}/toggle">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                         <input type="hidden" name="action" value="deactivate">
                         <button type="submit" class="btn btn-sm btn-danger">Выкл</button>
                     </form>
                     {{else}}
                     <form method="POST" action="/admin/invites/{{.ID}}/toggle">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                         <input type="hidden" name="action" value="activate">
                         <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
                     </form>
                     {{end}}
                     <form method="POST" action="/admin/invites/{{.ID}}/delete"
                           onsubmit="return confirm('Удалить инвайт? Он станет недействительным, но останется в списке для сохранения связи с уже зарегистрированными пользователями.');">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                         <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Удалить</button>
                     </form>
                 </div>

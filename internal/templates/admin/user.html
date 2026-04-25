@@ -40,14 +40,14 @@
             {{if .IsActive}}
             <form method="POST" action="/admin/users/{{.ID}}/toggle"
                   onsubmit="return confirm('Выключить пользователя {{.Username}}? Его выкинет из сессии, а VPN-профили отключатся.');">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                 <input type="hidden" name="action" value="deactivate">
                 <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                 <button type="submit" class="btn btn-danger">Выключить учётку</button>
             </form>
             {{else}}
             <form method="POST" action="/admin/users/{{.ID}}/toggle">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                 <input type="hidden" name="action" value="activate">
                 <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                 <button type="submit" class="btn btn-primary">Включить учётку</button>
@@ -132,7 +132,7 @@
     </div>
 
     <form method="POST" action="/admin/users/{{.ID}}/subscription" style="margin-bottom: 1rem;">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
         <div style="display: grid; grid-template-columns: 2fr 1fr auto; gap: 0.8rem; align-items: end;">
             <div>
@@ -155,7 +155,7 @@
     {{if .TariffLabel}}
     <form method="POST" action="/admin/users/{{.ID}}/subscription/cancel"
           onsubmit="return confirm('Отменить подписку? base обнулится, extra/frozen останется.');">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
         <button type="submit" class="btn" style="background: #475569; color: white;">Отменить подписку</button>
     </form>
@@ -213,7 +213,7 @@
 
     <form method="POST" action="/admin/users/{{.ID}}/extra"
           title="Установить extra-баланс (ГБ) — и плюс, и минус">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
         <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.8rem; align-items: end; max-width: 400px;">
             <div>
@@ -273,7 +273,7 @@
             </td>
             <td>
                 <form method="POST" action="/admin/profiles/{{.ID}}/limit" style="display: flex; gap: 0.3rem; align-items: center;">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                     <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                     <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
                         style="width: 80px; padding: 0.3rem 0.5rem; margin: 0;">
@@ -285,20 +285,20 @@
                 <div style="display: inline-flex; gap: 0.3rem;">
                     <form method="POST" action="/admin/profiles/{{.ID}}/toggle"
                           data-stat="profile-toggle-deactivate" style="{{if not .IsActive}}display: none;{{end}}">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                         <input type="hidden" name="action" value="deactivate">
                         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                         <button type="submit" class="btn btn-sm btn-danger">Откл</button>
                     </form>
                     <form method="POST" action="/admin/profiles/{{.ID}}/toggle"
                           data-stat="profile-toggle-activate" style="{{if .IsActive}}display: none;{{end}}">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                         <input type="hidden" name="action" value="activate">
                         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                         <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
                     </form>
                     <form method="POST" action="/admin/profiles/{{.ID}}/reset" onsubmit="return confirm('Сбросить трафик?')">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                         <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Сброс</button>
                     </form>

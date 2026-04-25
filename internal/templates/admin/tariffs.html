@@ -8,7 +8,7 @@
 <div class="card">
     <h3 style="margin-bottom: 1rem;">Новый тариф</h3>
     <form id="new-tariff-form" method="POST" action="/admin/tariffs">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
         <div class="form-grid">
             <div class="field">
                 <label>Тип</label>
@@ -78,7 +78,7 @@
     </div>
 
     <form method="POST" action="/admin/tariffs/{{.ID}}">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
         <div class="form-grid">
             <div class="field">
                 <label>Тип</label>
@@ -139,7 +139,7 @@
         </div>
     </form>
     <form id="del-{{.ID}}" method="POST" action="/admin/tariffs/{{.ID}}/delete" style="display: none;">
-                {{template "csrf" .}}</form>
+                {{template "csrf" $}}</form>
 </div>
 {{end}}
 

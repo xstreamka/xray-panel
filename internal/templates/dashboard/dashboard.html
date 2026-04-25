@@ -91,7 +91,7 @@
 <!-- Создание профиля -->
 <div class="card">
     <form method="POST" action="/dashboard/profiles" style="display: flex; gap: 0.8rem; align-items: end; flex-wrap: wrap;">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
         <div style="flex: 1; min-width: 150px;">
             <label for="name">Имя профиля</label>
             <input type="text" id="name" name="name" placeholder="phone, laptop, ..." style="margin-bottom: 0;">
@@ -137,13 +137,13 @@
             <button class="btn btn-sm btn-primary" onclick="showProfileChart(this)"
                     data-profile-id="{{.ID}}" data-profile-name="{{.Name}}">График</button>
             <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                 <input type="hidden" name="action" value="deactivate">
                 <button type="submit" class="btn btn-sm" style="background: #475569; color: white;" title="Выключить профиль (можно включить позже)">Выкл</button>
             </form>
             {{else}}
             <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                 <input type="hidden" name="action" value="activate">
                 <button type="submit" class="btn btn-sm btn-primary" data-stat="activate-btn"
                         {{if le $.TotalAvailable 0}}disabled title="Нет доступного трафика. Оплатите тариф."{{else}}title="Включить профиль"{{end}}>Вкл</button>
@@ -151,11 +151,11 @@
             {{end}}
             <form method="POST" action="/dashboard/profiles/{{.ID}}/reset" style="display:inline;"
                   onsubmit="return confirm('Сбросить трафик профиля? Счётчики устройства обнулятся.');">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                 <button type="submit" class="btn btn-sm" style="background: #475569; color: white;" title="Обнулить счётчики трафика этого устройства">Сброс</button>
             </form>
             <form method="POST" action="/dashboard/profiles/{{.ID}}/delete" style="display:inline;">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                 <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль? Баланс не изменится — трафик общий на подписку.')">✕</button>
             </form>
         </div>
@@ -175,7 +175,7 @@
         <form method="POST" action="/dashboard/profiles/{{.ID}}/limit"
               style="display: flex; gap: 0.3rem; align-items: center; margin-left: auto;"
               title="Личный лимит устройства (0 = безлимит)">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
             <label style="color: #94a3b8; font-size: 0.85rem; margin: 0;">Лимит:</label>
             <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
                 style="width: 80px; padding: 0.25rem 0.4rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">

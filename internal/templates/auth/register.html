@@ -16,7 +16,7 @@
             {{end}}
             {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
             <form method="POST" action="/register{{if .InviteCode}}?invite={{.InviteCode}}{{end}}">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                 {{if .InviteCode}}<input type="hidden" name="invite" value="{{.InviteCode}}">{{end}}
                 <label for="username">Логин</label>
                 <input type="text" id="username" name="username" required autofocus value="{{.Username}}">

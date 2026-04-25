@@ -89,13 +89,13 @@
                         {{if .IsActive}}
                         <form method="POST" action="/admin/users/{{.ID}}/toggle"
                               onsubmit="return confirm('Выключить пользователя {{.Username}}?');">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                             <input type="hidden" name="action" value="deactivate">
                             <button type="submit" class="btn btn-sm btn-danger" title="Выключить учётку">Выкл</button>
                         </form>
                         {{else}}
                         <form method="POST" action="/admin/users/{{.ID}}/toggle">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
                             <input type="hidden" name="action" value="activate">
                             <button type="submit" class="btn btn-sm btn-primary" title="Включить учётку">Вкл</button>
                         </form>

@@ -21,7 +21,7 @@
         </p>
 
         <form method="POST" action="/resend-verification" style="margin-bottom: 1rem;">
-                {{template "csrf" .}}
+                {{template "csrf" $}}
             <button type="submit" class="btn btn-primary">Отправить повторно</button>
         </form>
 
