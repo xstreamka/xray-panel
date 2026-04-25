@@ -127,13 +127,14 @@
         <div class="form-actions">
             <button type="submit" class="btn btn-primary">Сохранить</button>
             <button type="button" class="btn btn-sm" style="background: #475569; color: white;"
-                    onclick="copyTariff(this)"
+                    data-copy-tariff
                     title="Скопировать поля в форму создания сверху">
                 Копировать
             </button>
             <span class="spacer"></span>
             <button type="button" class="btn btn-sm btn-danger"
-                    onclick="if(confirm('Удалить тариф {{.Code}}? Это необратимо.')) document.getElementById('del-{{.ID}}').submit();">
+                    data-delete-tariff="del-{{.ID}}"
+                    data-tariff-code="{{.Code}}">
                 Удалить
             </button>
         </div>

@@ -1,6 +1,8 @@
 // Копирование тарифа: берём поля из формы редактирования, переносим в форму
 // создания сверху. Код обязательно меняем (unique-constraint в БД), чтобы юзер
 // сразу видел, что его нужно отредактировать.
+// Inline onclick недопустим из-за CSP (script-src 'self' без unsafe-inline) —
+// навешиваем обработчики через делегирование на data-атрибуты.
 function copyTariff(btn) {
     const src = btn.closest('form');
     const dst = document.getElementById('new-tariff-form');
@@ -27,3 +29,18 @@ function copyTariff(btn) {
         codeField.select();
     }
 }
+
+document.addEventListener('click', (e) => {
+    const copyBtn = e.target.closest('[data-copy-tariff]');
+    if (copyBtn) {
+        copyTariff(copyBtn);
+        return;
+    }
+    const delBtn = e.target.closest('[data-delete-tariff]');
+    if (delBtn) {
+        const code = delBtn.dataset.tariffCode || '';
+        if (!confirm(`Удалить тариф ${code}? Это необратимо.`)) return;
+        const form = document.getElementById(delBtn.dataset.deleteTariff);
+        if (form) form.submit();
+    }
+});
