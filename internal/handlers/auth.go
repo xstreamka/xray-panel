@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 
@@ -12,6 +13,16 @@ import (
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
 )
+
+// rateLimitKey достаёт чистый IP (без порта) из r.RemoteAddr.
+// RealIP-middleware обычно уже это сделал, но делаем defensive — если
+// цепочка middleware не подключена, source port рандомизируется и обходит лимит.
+func rateLimitKey(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
 
 // msgUserDeactivated — текст для формы входа и редиректа из middleware,
 // когда учётка помечена is_active=FALSE. Единое место, чтобы формулировка
@@ -342,7 +353,7 @@ func (h *AuthHandler) ForgotPasswordPage(w http.ResponseWriter, r *http.Request)
 func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	loginOrEmail := strings.TrimSpace(r.FormValue("login_or_email"))
 
-	if h.resetLimiter != nil && !h.resetLimiter.Allow(r.RemoteAddr) {
+	if h.resetLimiter != nil && !h.resetLimiter.Allow(rateLimitKey(r)) {
 		h.renderer.Render(w, "forgot_password.html", map[string]any{
 			"LimitMax":     ResetLimitMax,
 			"LimitWindow":  ResetLimitWindow,

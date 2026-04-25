@@ -71,7 +71,9 @@ func (rl *RateLimiter) cleanup() {
 
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr
+		// stripPort на случай, если RealIP не запущен в цепочке —
+		// иначе random source-port ломает per-IP лимит.
+		ip := stripPort(r.RemoteAddr)
 		if !rl.Allow(ip) {
 			http.Error(w, "Слишком много попыток, подождите", http.StatusTooManyRequests)
 			return

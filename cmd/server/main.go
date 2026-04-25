@@ -124,7 +124,14 @@ func main() {
 	loginLimiter := middleware.NewRateLimiter(5, time.Minute)
 
 	r := chi.NewRouter()
-	r.Use(chimw.RealIP)
+	// Кастомный RealIP: доверяем X-Forwarded-For/X-Real-IP только если
+	// соединение пришло из TRUSTED_PROXIES. Если список пуст — заголовки
+	// игнорируются. Это закрывает обход rate-limit подделкой XFF.
+	realIP := middleware.NewRealIP(cfg.TrustedProxies)
+	if cfg.TrustedProxies == "" {
+		log.Println("RealIP: TRUSTED_PROXIES is empty — proxy headers are ignored, peer IP is used as-is")
+	}
+	r.Use(realIP.Middleware)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Compress(5))

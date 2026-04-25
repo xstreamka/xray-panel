@@ -15,6 +15,12 @@ type Config struct {
 	SecretKey  string
 	BaseURL    string // https://vpn.example.com — для ссылок в письмах
 
+	// TrustedProxies — список CIDR/IP (через запятую), от которых разрешено
+	// принимать X-Forwarded-For / X-Real-IP. Иначе любой клиент подделывает
+	// заголовок и обходит rate-limit. Если панель за nginx на том же хосте —
+	// "127.0.0.1/32,::1/128"; если nginx на отдельной машине — её IP.
+	TrustedProxies string
+
 	// PostgreSQL
 	DBHost string
 	DBPort string
@@ -70,6 +76,8 @@ func Load() (*Config, error) {
 		ListenAddr: getEnv("LISTEN_ADDR", ":8080"),
 		SecretKey:  getEnv("SECRET_KEY", ""),
 		BaseURL:    getEnv("BASE_URL", "http://localhost:8080"),
+
+		TrustedProxies: getEnv("TRUSTED_PROXIES", ""),
 
 		DBHost: getEnv("DB_HOST", "127.0.0.1"),
 		DBPort: getEnv("DB_PORT", "5432"),
