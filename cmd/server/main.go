@@ -135,7 +135,7 @@ func main() {
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Compress(5))
-	r.Use(middleware.SecurityHeaders(cfg.BaseURL))
+	r.Use(middleware.SecurityHeaders(cfg.BaseURL, cfg.PayServiceURL))
 	// Глобальный лимит на тело запроса: 64 KiB. Все формы панели в это
 	// помещаются с запасом. Webhook идёт отдельно (вне группы), при необходимости
 	// получит свой лимит. /feedback ставит более жёсткий локальный MaxBytesReader.
