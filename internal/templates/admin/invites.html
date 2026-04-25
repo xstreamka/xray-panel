@@ -69,7 +69,6 @@
     <div>
     <table>
         <tr>
-            <th>Ссылка / код</th>
             <th>Заметка</th>
             <th>Автор</th>
             <th title="Количество переходов по ссылке">Переходы</th>
@@ -81,16 +80,6 @@
         </tr>
         {{range .Invites}}
         <tr {{if .IsDeleted}}style="opacity: 0.5; text-decoration: line-through;"{{end}}>
-            <td>
-                <div style="display: flex; gap: 0.3rem; align-items: center;">
-                    <code style="font-size: 0.75rem; background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 4px;">{{.Code}}</code>
-                    {{if not .IsDeleted}}
-                    <button type="button" class="btn btn-sm" style="background: #475569; color: white;"
-                            data-invite-link="{{$.BaseURL}}/register?invite={{.Code}}"
-                            title="Копировать ссылку">📋</button>
-                    {{end}}
-                </div>
-            </td>
             <td style="font-size: 0.85rem; color: #cbd5e1;">
                 <div style="display: flex; gap: 0.3rem; align-items: center;">
                     <span data-invite-note-text>{{if .Note}}{{.Note}}{{else}}—{{end}}</span>
@@ -123,6 +112,11 @@
             <td>
                 {{if not .IsDeleted}}
                 <div style="display: flex; gap: 0.3rem;">
+                                        {{if .IsActive}}
+                                        <button type="button" class="btn btn-sm" style="background: #475569; color: white;"
+                                                data-invite-link="{{$.BaseURL}}/register?invite={{.Code}}"
+                                                title="Копировать ссылку">📋</button>
+                                        {{end}}
                     {{if .IsActive}}
                     <form method="POST" action="/admin/invites/{{.ID}}/toggle">
                 {{template "csrf" $}}
