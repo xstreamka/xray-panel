@@ -69,17 +69,26 @@
     <div>
     <table>
         <tr>
+            <th>Ссылка / код</th>
             <th>Заметка</th>
             <th>Автор</th>
-            <th title="Количество переходов по ссылке">Переходы</th>
-            <th title="Зарегистрировались по инвайту">Регистрации</th>
-            <th title="Из них с подтверждённым email">Verified</th>
+            <th>Переходы<br>Регистрации<br>Verified</th>
             <th>Статус</th>
             <th>Создан</th>
             <th>Действия</th>
         </tr>
         {{range .Invites}}
         <tr {{if .IsDeleted}}style="opacity: 0.5; text-decoration: line-through;"{{end}}>
+             <td>
+                <div style="display: flex; gap: 0.3rem; align-items: center;">
+                    <code style="font-size: 0.75rem; background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 4px;">{{.Code}}</code>
+                    {{if .IsActive}}
+                    <button type="button" class="btn btn-sm" style="background: #475569; color: white;"
+                            data-invite-link="{{$.BaseURL}}/register?invite={{.Code}}"
+                            title="Копировать ссылку">📋</button>
+                    {{end}}
+                </div>
+            </td>
             <td style="font-size: 0.85rem; color: #cbd5e1;">
                 <div style="display: flex; gap: 0.3rem; align-items: center;">
                     <span data-invite-note-text>{{if .Note}}{{.Note}}{{else}}—{{end}}</span>
@@ -96,9 +105,7 @@
                 </div>
             </td>
             <td style="font-size: 0.85rem;">{{if .CreatorLogin}}{{.CreatorLogin}}{{else}}<span style="color: #64748b;">—</span>{{end}}</td>
-            <td>{{.Clicks}}</td>
-            <td><a href="/admin/invites/{{.ID}}/users" style="color: #38bdf8;">{{.Registered}}</a></td>
-            <td>{{.Verified}}</td>
+            <td>{{.Clicks}} / <a href="/admin/invites/{{.ID}}/users" style="color: #38bdf8;">{{.Registered}}</a> / {{.Verified}}</td>
             <td>
                 {{if .IsDeleted}}
                     <span class="badge badge-red">удалён</span>
@@ -112,11 +119,6 @@
             <td>
                 {{if not .IsDeleted}}
                 <div style="display: flex; gap: 0.3rem;">
-                                        {{if .IsActive}}
-                                        <button type="button" class="btn btn-sm" style="background: #475569; color: white;"
-                                                data-invite-link="{{$.BaseURL}}/register?invite={{.Code}}"
-                                                title="Копировать ссылку">📋</button>
-                                        {{end}}
                     {{if .IsActive}}
                     <form method="POST" action="/admin/invites/{{.ID}}/toggle">
                 {{template "csrf" $}}
