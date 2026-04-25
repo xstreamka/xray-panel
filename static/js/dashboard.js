@@ -18,6 +18,26 @@ function showQR(btn) {
     modal.style.display = 'flex';
 }
 
+// Делегированный диспетчер действий на карточках профилей.
+// Inline onclick недопустим из-за CSP — вешаем на data-action.
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    switch (btn.dataset.action) {
+        case 'copy-uri':
+            copyURI(btn);
+            break;
+        case 'show-qr':
+            showQR(btn);
+            break;
+        case 'show-profile-chart':
+            if (typeof window.showProfileChart === 'function') {
+                window.showProfileChart(btn);
+            }
+            break;
+    }
+});
+
 function refreshStats() {
     fetch('/dashboard/stats')
         .then(r => r.json())

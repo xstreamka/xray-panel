@@ -132,9 +132,9 @@
         </div>
         <div style="display: flex; gap: 0.4rem;">
             {{if .IsActive}}
-            <button class="btn btn-sm btn-primary" onclick="copyURI(this)" data-uri="{{.VlessURI}}">Копировать</button>
-            <button class="btn btn-sm btn-primary" onclick="showQR(this)" data-uri="{{.VlessURI}}">QR</button>
-            <button class="btn btn-sm btn-primary" onclick="showProfileChart(this)"
+            <button class="btn btn-sm btn-primary" data-action="copy-uri" data-uri="{{.VlessURI}}">Копировать</button>
+            <button class="btn btn-sm btn-primary" data-action="show-qr" data-uri="{{.VlessURI}}">QR</button>
+            <button class="btn btn-sm btn-primary" data-action="show-profile-chart"
                     data-profile-id="{{.ID}}" data-profile-name="{{.Name}}">График</button>
             <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
                 {{template "csrf" $}}
@@ -150,13 +150,14 @@
             </form>
             {{end}}
             <form method="POST" action="/dashboard/profiles/{{.ID}}/reset" style="display:inline;"
-                  onsubmit="return confirm('Сбросить трафик профиля? Счётчики устройства обнулятся.');">
+                  data-confirm="Сбросить трафик профиля? Счётчики устройства обнулятся.">
                 {{template "csrf" $}}
                 <button type="submit" class="btn btn-sm" style="background: #475569; color: white;" title="Обнулить счётчики трафика этого устройства">Сброс</button>
             </form>
-            <form method="POST" action="/dashboard/profiles/{{.ID}}/delete" style="display:inline;">
+            <form method="POST" action="/dashboard/profiles/{{.ID}}/delete" style="display:inline;"
+                  data-confirm="Удалить профиль? Баланс не изменится — трафик общий на подписку.">
                 {{template "csrf" $}}
-                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить профиль? Баланс не изменится — трафик общий на подписку.')">✕</button>
+                <button type="submit" class="btn btn-sm btn-danger">✕</button>
             </form>
         </div>
     </div>
@@ -231,16 +232,15 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="/static/js/traffic-chart.js?v={{assetVersion}}" defer></script>
 
-<!-- QR модалка -->
-<div id="qr-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; align-items:center; justify-content:center;" onclick="this.style.display='none'">
-    <div style="background: white; padding: 1.5rem; border-radius: 12px;" onclick="event.stopPropagation()">
+<!-- QR модалка. data-modal-bg + клик по фону закрывает (см. csp-shim.js). -->
+<div id="qr-modal" data-modal-bg style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; align-items:center; justify-content:center;">
+    <div style="background: white; padding: 1.5rem; border-radius: 12px;">
         <div id="qr-canvas"></div>
     </div>
 </div>
 
 <!-- Модалка с графиком профиля -->
-<div id="profile-chart-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:100; align-items:center; justify-content:center; padding: 1rem;"
-     onclick="if(event.target===this) this.style.display='none'">
+<div id="profile-chart-modal" data-modal-bg style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:100; align-items:center; justify-content:center; padding: 1rem;">
     <div style="background: #1e293b; padding: 1.25rem; border-radius: 12px; width: 100%; max-width: 720px;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:0.8rem; flex-wrap:wrap; margin-bottom:1rem;">
             <h3 style="margin:0;">Трафик: <span id="profile-chart-name" style="color:#94a3b8;"></span></h3>
@@ -252,7 +252,7 @@
                     <button type="button" class="btn btn-sm" data-range="90d" style="background:#334155; color:#e2e8f0;">90 дней</button>
                 </div>
                 <button type="button" class="btn btn-sm" style="background:#475569; color:white;"
-                        onclick="document.getElementById('profile-chart-modal').style.display='none'">✕</button>
+                        data-close-modal="profile-chart-modal">✕</button>
             </div>
         </div>
         <div style="position:relative; height:320px;">

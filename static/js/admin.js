@@ -159,7 +159,11 @@ function updateCountdown() {
 }
 
 (function() {
+    const select = document.getElementById('refresh-interval');
+    if (!select) return;
     const saved = localStorage.getItem('admin-refresh') || '30';
-    document.getElementById('refresh-interval').value = saved;
+    select.value = saved;
     setRefresh(saved);
+    // CSP: inline onchange недопустим — навешиваем здесь.
+    select.addEventListener('change', (e) => setRefresh(e.target.value));
 })();

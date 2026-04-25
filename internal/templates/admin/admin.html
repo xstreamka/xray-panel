@@ -8,7 +8,7 @@
     <h1 style="margin: 0;">Пользователи</h1>
     <div style="display: flex; align-items: center; gap: 0.5rem;">
         <span style="color: #94a3b8; font-size: 0.85rem;">Обновление:</span>
-        <select id="refresh-interval" onchange="setRefresh(this.value)"
+        <select id="refresh-interval" data-refresh-select
             style="padding: 0.3rem 0.5rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem; width: auto; margin: 0;">
             <option value="0">выкл</option>
             <option value="5">5 сек</option>
@@ -88,7 +88,7 @@
                     {{if ne .ID $.User.ID}}
                         {{if .IsActive}}
                         <form method="POST" action="/admin/users/{{.ID}}/toggle"
-                              onsubmit="return confirm('Выключить пользователя {{.Username}}?');">
+                              data-confirm="Выключить пользователя {{.Username}}?">
                 {{template "csrf" $}}
                             <input type="hidden" name="action" value="deactivate">
                             <button type="submit" class="btn btn-sm btn-danger" title="Выключить учётку">Выкл</button>
