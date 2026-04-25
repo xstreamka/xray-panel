@@ -109,21 +109,24 @@ func (s *StatsCollector) notifyBlock(userID int, reason string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		first, err := s.users.TryMarkBlockNotified(ctx, userID)
-		if err != nil {
-			log.Printf("Notify block: mark user %d: %v", userID, err)
-			return nil
-		}
-		if !first {
-			return nil
-		}
-
+		// Сначала читаем настройку юзера: если notify_block выключен — не
+		// расходуем попытку (не ставим флаг). Юзер может включить галку —
+		// и при следующем тике коллектора письмо отправится. TryMark идёт
+		// после проверки и атомарно защищает от гонок.
 		u, err := s.users.GetByID(ctx, userID)
 		if err != nil {
 			log.Printf("Notify block: get user %d: %v", userID, err)
 			return nil
 		}
 		if !u.NotifyBlock {
+			return nil
+		}
+		first, err := s.users.TryMarkBlockNotified(ctx, userID)
+		if err != nil {
+			log.Printf("Notify block: mark user %d: %v", userID, err)
+			return nil
+		}
+		if !first {
 			return nil
 		}
 		return s.mailer.SendBlockNotification(u.Email, u.Username, reason, s.baseURL)
@@ -146,21 +149,22 @@ func (s *StatsCollector) notifyProfileLimit(profileID, userID int, profileName s
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		first, err := s.profiles.TryMarkLimitNotified(ctx, profileID)
-		if err != nil {
-			log.Printf("Notify profile limit: mark profile %d: %v", profileID, err)
-			return nil
-		}
-		if !first {
-			return nil
-		}
-
+		// См. комментарий в notifyBlock: настройку проверяем до TryMark,
+		// иначе включение галки post-factum никогда не разморозит уведомление.
 		u, err := s.users.GetByID(ctx, userID)
 		if err != nil {
 			log.Printf("Notify profile limit: get user %d: %v", userID, err)
 			return nil
 		}
 		if !u.NotifyProfileLimit {
+			return nil
+		}
+		first, err := s.profiles.TryMarkLimitNotified(ctx, profileID)
+		if err != nil {
+			log.Printf("Notify profile limit: mark profile %d: %v", profileID, err)
+			return nil
+		}
+		if !first {
 			return nil
 		}
 		return s.mailer.SendProfileLimitNotification(u.Email, u.Username, profileName, limitBytes, s.baseURL)
@@ -178,21 +182,21 @@ func (s *StatsCollector) notifyTrafficLow(userID int, remaining int64) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		first, err := s.users.TryMarkTrafficLowNotified(ctx, userID)
-		if err != nil {
-			log.Printf("Notify low: mark user %d: %v", userID, err)
-			return nil
-		}
-		if !first {
-			return nil
-		}
-
+		// См. notifyBlock: настройку проверяем до TryMark.
 		u, err := s.users.GetByID(ctx, userID)
 		if err != nil {
 			log.Printf("Notify low: get user %d: %v", userID, err)
 			return nil
 		}
 		if !u.NotifyTrafficLow {
+			return nil
+		}
+		first, err := s.users.TryMarkTrafficLowNotified(ctx, userID)
+		if err != nil {
+			log.Printf("Notify low: mark user %d: %v", userID, err)
+			return nil
+		}
+		if !first {
 			return nil
 		}
 		return s.mailer.SendTrafficLowNotification(u.Email, u.Username, remaining, s.baseURL)

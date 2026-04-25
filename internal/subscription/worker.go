@@ -99,8 +99,21 @@ func (w *Worker) runExpire(ctx context.Context) {
 // notifyBlock шлёт юзеру email об истечении подписки. Идемпотентно:
 // TryMarkBlockNotified защищает от повторной отправки, пока юзер не
 // продлит подписку или не получит пополнение (что сбросит флаг).
+//
+// Порядок важен: сначала проверяем NotifyBlock, потом TryMark. Иначе если
+// юзер выключил галку — флаг бы выставился вхолостую, и включение галки
+// post-factum не разблокировало бы уведомление до следующего пополнения.
 func (w *Worker) notifyBlock(ctx context.Context, userID int) {
 	if w.mailer == nil {
+		return
+	}
+	u, err := w.users.GetByID(ctx, userID)
+	if err != nil {
+		log.Printf("Subscription: notify block user=%d: %v", userID, err)
+		return
+	}
+	if !u.NotifyBlock {
+		log.Printf("Subscription: block mail skipped for user %d (notify_block=off)", userID)
 		return
 	}
 	first, err := w.users.TryMarkBlockNotified(ctx, userID)
@@ -109,16 +122,6 @@ func (w *Worker) notifyBlock(ctx context.Context, userID int) {
 		return
 	}
 	if !first {
-		return
-	}
-
-	u, err := w.users.GetByID(ctx, userID)
-	if err != nil {
-		log.Printf("Subscription: notify block user=%d: %v", userID, err)
-		return
-	}
-	if !u.NotifyBlock {
-		log.Printf("Subscription: block mail skipped for user %d (notify_block=off)", userID)
 		return
 	}
 	to, username := u.Email, u.Username
