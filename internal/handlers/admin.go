@@ -295,7 +295,7 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 		views = append(views, h.buildUserView(r.Context(), u, profilesByUser[u.ID], tariffNames))
 	}
 
-	h.renderer.Render(w, "admin.html", map[string]any{
+	h.renderer.Render(w, r, "admin.html", map[string]any{
 		"Active": "admin",
 		"User":   middleware.UserFromContext(r.Context()),
 		"Users":  views,
@@ -346,7 +346,7 @@ func (h *AdminHandler) UserView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.renderer.Render(w, "user.html", map[string]any{
+	h.renderer.Render(w, r, "user.html", map[string]any{
 		"Active":   "admin",
 		"User":     middleware.UserFromContext(r.Context()),
 		"View":     view,
@@ -790,7 +790,7 @@ func (h *AdminHandler) TariffsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
-	h.renderer.Render(w, "tariffs.html", map[string]any{
+	h.renderer.Render(w, r, "tariffs.html", map[string]any{
 		"Active":  "admin-tariffs",
 		"User":    middleware.UserFromContext(r.Context()),
 		"Tariffs": tariffs,
@@ -927,7 +927,7 @@ func (h *AdminHandler) InvitesList(w http.ResponseWriter, r *http.Request) {
 	}
 	mode, _ := h.invites.GetRegistrationMode(r.Context())
 
-	h.renderer.Render(w, "invites.html", map[string]any{
+	h.renderer.Render(w, r, "invites.html", map[string]any{
 		"Active":         "admin-invites",
 		"User":           middleware.UserFromContext(r.Context()),
 		"Invites":        invites,
@@ -1010,7 +1010,7 @@ func (h *AdminHandler) InviteUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
-	h.renderer.Render(w, "invite_users.html", map[string]any{
+	h.renderer.Render(w, r, "invite_users.html", map[string]any{
 		"Active": "admin-invites",
 		"User":   middleware.UserFromContext(r.Context()),
 		"Invite": inv,

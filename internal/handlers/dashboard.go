@@ -73,7 +73,7 @@ func (h *DashboardHandler) renderError(w http.ResponseWriter, r *http.Request, s
 	backURL := r.Referer()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	_ = h.renderer.Render(w, "error.html", map[string]any{
+	_ = h.renderer.Render(w, r, "error.html", map[string]any{
 		"Title":   title,
 		"Message": message,
 		"BackURL": backURL,
@@ -175,7 +175,7 @@ func (h *DashboardHandler) Welcome(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Welcome: list addon tariffs error: %v", err)
 	}
 
-	h.renderer.Render(w, "welcome.html", map[string]any{
+	h.renderer.Render(w, r, "welcome.html", map[string]any{
 		"Active":              "welcome",
 		"User":                user,
 		"TariffLabel":         tariffLabel,
@@ -288,7 +288,7 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.renderer.Render(w, "dashboard.html", map[string]any{
+	h.renderer.Render(w, r, "dashboard.html", map[string]any{
 		"Active":         "dashboard",
 		"User":           user,
 		"Profiles":       views,

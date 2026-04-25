@@ -1,3 +1,7 @@
+{{/* csrf — общий partial для всех форм. .CSRFToken прокидывает Renderer
+    из request-контекста (см. internal/middleware/csrf.go). */}}
+{{define "csrf"}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+
 {{define "base"}}
 <!DOCTYPE html>
 <html lang="ru">

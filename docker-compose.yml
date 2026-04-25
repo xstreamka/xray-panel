@@ -17,7 +17,7 @@ services:
       retries: 5
 
   xray:
-    image: ghcr.io/xtls/xray-core:latest
+    image: ghcr.io/xtls/xray-core:${XRAY_IMAGE_TAG:-25.5.16}
     restart: unless-stopped
     network_mode: host
     user: "0:0"

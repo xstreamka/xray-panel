@@ -20,7 +20,7 @@ func NewSettingsHandler(users *models.UserStore, renderer *Renderer) *SettingsHa
 // Index — страница «Настройки» с галочками уведомлений.
 func (h *SettingsHandler) Index(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
-	h.renderer.Render(w, "settings.html", map[string]any{
+	h.renderer.Render(w, r, "settings.html", map[string]any{
 		"Active": "settings",
 		"User":   user,
 	})
@@ -52,7 +52,7 @@ func (h *SettingsHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.renderer.Render(w, "settings.html", map[string]any{
+	h.renderer.Render(w, r, "settings.html", map[string]any{
 		"Active":  "settings",
 		"User":    u,
 		"Success": "Настройки сохранены",

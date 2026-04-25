@@ -75,6 +75,7 @@
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
     {{range .SubPlans}}
     <form method="POST" action="/pay/checkout" style="margin: 0;">
+                {{template "csrf" .}}
         <input type="hidden" name="plan_id" value="{{.Code}}">
         <div class="card" style="position: relative; text-align: center; margin: 0; {{if .IsPopular}}border: 1px solid #3b82f6;{{end}}">
             {{if .IsPopular}}
@@ -109,6 +110,7 @@
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
     {{range .AddonPlans}}
     <form method="POST" action="/pay/checkout" style="margin: 0;">
+                {{template "csrf" .}}
         <input type="hidden" name="plan_id" value="{{.Code}}">
         <div class="card" style="position: relative; text-align: center; margin: 0; opacity: {{if $.HasActiveSub}}1{{else}}0.55{{end}}; {{if .IsPopular}}border: 1px solid #3b82f6;{{end}}">
             {{if .IsPopular}}

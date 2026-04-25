@@ -22,6 +22,7 @@
     {{end}}
 
     <form method="POST" action="/feedback">
+                {{template "csrf" .}}
         <div style="display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 1rem;">
             <label style="display: flex; flex-direction: column; gap: 0.3rem; color: #e2e8f0; font-size: 0.9rem;">
                 <span>Тема</span>

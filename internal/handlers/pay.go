@@ -99,7 +99,7 @@ func (h *PayHandler) Index(w http.ResponseWriter, r *http.Request) {
 		baseRemaining = 0
 	}
 
-	h.renderer.Render(w, "pay.html", map[string]any{
+	h.renderer.Render(w, r, "pay.html", map[string]any{
 		"Active":        "pay",
 		"User":          user,
 		"SubPlans":      subPlans,
@@ -405,7 +405,7 @@ func (h *PayHandler) History(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.renderer.Render(w, "payments_history.html", map[string]any{
+	h.renderer.Render(w, r, "payments_history.html", map[string]any{
 		"Active":     "pay",
 		"User":       user,
 		"Receipts":   receipts,
