@@ -332,7 +332,11 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.mailer != nil {
-		go h.sendPaymentEmail(userID, p.InvID, tariff, trafficGB, amountRub)
+		uid, inv, t, gb, rub := userID, p.InvID, tariff, trafficGB, amountRub
+		h.mailer.Submit(fmt.Sprintf("payment notify user=%d inv_id=%d", uid, inv), func() error {
+			h.sendPaymentEmail(uid, inv, t, gb, rub)
+			return nil
+		})
 	}
 
 	writeOK(w)

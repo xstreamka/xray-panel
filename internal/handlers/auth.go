@@ -251,14 +251,13 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Отправляем письмо верификации
 	if h.mailer != nil {
-		go func() {
-			if err := h.mailer.SendVerification(emailAddr, token, h.baseURL); err != nil {
-				log.Printf("Failed to send verification email to %s: %v", emailAddr, err)
-			}
-		}()
+		h.mailer.Submit("verification email to "+emailAddr, func() error {
+			return h.mailer.SendVerification(emailAddr, token, h.baseURL)
+		})
 	} else {
-		// SMTP не настроен — логируем токен для ручной верификации
-		log.Printf("SMTP not configured. Verify URL: %s/verify?token=%s", h.baseURL, token)
+		// SMTP не настроен — НЕ логируем токен (он бы утёк в любой агрегатор логов).
+		// В dev админ может выдернуть его прямо из БД: SELECT verify_token FROM users WHERE id = N.
+		log.Printf("SMTP not configured: verification email NOT sent for user_id=%d (%s). Set SMTP_* envs.", user.ID, emailAddr)
 	}
 
 	h.auth.SetSession(w, user.ID)
@@ -304,13 +303,11 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 	}
 
 	if h.mailer != nil {
-		go func() {
-			if err := h.mailer.SendVerification(emailAddr, token, h.baseURL); err != nil {
-				log.Printf("Failed to resend verification to %s: %v", emailAddr, err)
-			}
-		}()
+		h.mailer.Submit("resend verification to "+emailAddr, func() error {
+			return h.mailer.SendVerification(emailAddr, token, h.baseURL)
+		})
 	} else {
-		log.Printf("SMTP not configured. Verify URL: %s/verify?token=%s", h.baseURL, token)
+		log.Printf("SMTP not configured: verification email NOT sent for user_id=%d. Set SMTP_* envs.", user.ID)
 	}
 
 	h.renderer.Render(w, r, "verify_pending.html", map[string]any{
@@ -401,13 +398,12 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if userID != nil && token != "" {
 		if h.mailer != nil {
-			go func() {
-				if sendErr := h.mailer.SendPasswordReset(emailAddr, token, h.baseURL); sendErr != nil {
-					log.Printf("Failed to send password reset to %s: %v", emailAddr, sendErr)
-				}
-			}()
+			h.mailer.Submit("password reset to "+emailAddr, func() error {
+				return h.mailer.SendPasswordReset(emailAddr, token, h.baseURL)
+			})
 		} else {
-			log.Printf("SMTP not configured. Password reset URL: %s/reset?token=%s", h.baseURL, token)
+			// Токен в лог не пишем — в dev можно достать из users.reset_token по userID.
+			log.Printf("SMTP not configured: password reset email NOT sent for user_id=%d. Set SMTP_* envs.", *userID)
 		}
 	}
 

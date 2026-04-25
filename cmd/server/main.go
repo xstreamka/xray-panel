@@ -246,6 +246,11 @@ func main() {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		srv.Shutdown(shutdownCtx)
+		// Дождёмся фоновых отправок писем (verification, reset, payment notify, и т.п.).
+		// Без этого SIGTERM мог дропнуть письмо, ушедшее в горутину секунду назад.
+		if mailer != nil {
+			mailer.Shutdown(10 * time.Second)
+		}
 	}()
 
 	log.Printf("Starting server on %s", cfg.ListenAddr)

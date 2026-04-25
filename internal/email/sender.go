@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/smtp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -16,6 +18,13 @@ type Sender struct {
 	User     string // mail@xstreamka.dev
 	Password string
 	From     string // "XStreamka Dev <mail@xstreamka.dev>"
+
+	// wg отслеживает все фоновые отправки, поставленные через Submit.
+	// При SIGTERM main.go вызывает Shutdown — он ждёт wg.Wait() с таймаутом,
+	// чтобы не дропать письма, которые уже улетели в SMTP-сессию.
+	wg      sync.WaitGroup
+	closed  atomic.Bool
+	pending atomic.Int64
 }
 
 func NewSender(host, port, user, password, from string) *Sender {
@@ -25,6 +34,52 @@ func NewSender(host, port, user, password, from string) *Sender {
 		User:     user,
 		Password: password,
 		From:     from,
+	}
+}
+
+// Submit запускает fn в горутине под общим WaitGroup. Ошибки логируются с label.
+// После Shutdown новые задачи отвергаются (письмо при графешатдауне просто
+// не уйдёт — зато точно знаем границу). nil-safe: можно звать на nil-Sender,
+// тогда задача проглатывается с warning.
+func (s *Sender) Submit(label string, fn func() error) {
+	if s == nil {
+		log.Printf("Mailer: rejected submit (%s): SMTP is not configured", label)
+		return
+	}
+	if s.closed.Load() {
+		log.Printf("Mailer: rejected submit (%s): mailer is shutting down", label)
+		return
+	}
+	s.wg.Add(1)
+	s.pending.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.pending.Add(-1)
+		if err := fn(); err != nil {
+			log.Printf("Mailer: %s failed: %v", label, err)
+		}
+	}()
+}
+
+// Shutdown переводит Sender в закрытое состояние и ждёт завершения текущих
+// отправок не дольше timeout. Возвращает количество писем, не успевших уйти.
+func (s *Sender) Shutdown(timeout time.Duration) int64 {
+	if s == nil {
+		return 0
+	}
+	s.closed.Store(true)
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return 0
+	case <-time.After(timeout):
+		dropped := s.pending.Load()
+		log.Printf("Mailer: shutdown timed out after %s, %d email(s) may not have been delivered", timeout, dropped)
+		return dropped
 	}
 }
 

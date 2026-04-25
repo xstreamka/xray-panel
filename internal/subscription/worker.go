@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -120,11 +121,10 @@ func (w *Worker) notifyBlock(ctx context.Context, userID int) {
 		log.Printf("Subscription: block mail skipped for user %d (notify_block=off)", userID)
 		return
 	}
-	go func(to, username string) {
-		if err := w.mailer.SendBlockNotification(to, username, "expired", w.baseURL); err != nil {
-			log.Printf("Subscription: block email user=%d: %v", userID, err)
-		}
-	}(u.Email, u.Username)
+	to, username := u.Email, u.Username
+	w.mailer.Submit(fmt.Sprintf("subscription block user=%d", userID), func() error {
+		return w.mailer.SendBlockNotification(to, username, "expired", w.baseURL)
+	})
 }
 
 // runReminders шлёт напоминания за 5 и 1 день до окончания подписки.
