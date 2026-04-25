@@ -31,7 +31,7 @@ func NewSender(host, port, user, password, from string) *Sender {
 func (s *Sender) SendVerification(to, token, baseURL string) error {
 	verifyURL := fmt.Sprintf("%s/verify?token=%s", strings.TrimRight(baseURL, "/"), token)
 
-	subject := "Подтверждение email — VPN Panel"
+	subject := "Подтверждение email — XS VPN"
 	body := fmt.Sprintf(`Привет!
 
 Для подтверждения email перейдите по ссылке:
@@ -43,7 +43,7 @@ func (s *Sender) SendVerification(to, token, baseURL string) error {
 Если вы не регистрировались — проигнорируйте это письмо.
 
 —
-VPN Panel`, verifyURL)
+XS VPN`, verifyURL)
 
 	return s.send(to, subject, body)
 }
@@ -53,7 +53,7 @@ VPN Panel`, verifyURL)
 func (s *Sender) SendPasswordReset(to, token, baseURL string) error {
 	resetURL := fmt.Sprintf("%s/reset?token=%s", strings.TrimRight(baseURL, "/"), token)
 
-	subject := "Восстановление пароля — VPN Panel"
+	subject := "Восстановление пароля — XS VPN"
 	body := fmt.Sprintf(`Привет!
 
 Кто-то запросил восстановление пароля для вашего аккаунта.
@@ -65,7 +65,7 @@ func (s *Sender) SendPasswordReset(to, token, baseURL string) error {
 Если запрос отправляли не вы — проигнорируйте это письмо, пароль не изменится.
 
 —
-VPN Panel`, resetURL)
+XS VPN`, resetURL)
 
 	return s.send(to, subject, body)
 }
@@ -75,7 +75,7 @@ func (s *Sender) SendTopupNotification(to, username string, trafficGB, amountRub
 	dashURL := strings.TrimRight(baseURL, "/") + "/dashboard"
 	settingsURL := strings.TrimRight(baseURL, "/") + "/settings"
 
-	subject := fmt.Sprintf("Баланс пополнен на %.1f ГБ — VPN Panel", trafficGB)
+	subject := fmt.Sprintf("Баланс пополнен на %.1f ГБ — XS VPN", trafficGB)
 	body := fmt.Sprintf(`Привет, %s!
 
 Оплата получена, баланс пополнен.
@@ -93,7 +93,7 @@ func (s *Sender) SendTopupNotification(to, username string, trafficGB, amountRub
 %s
 
 —
-VPN Panel`, username, invID, amountRub, trafficGB, dashURL, settingsURL)
+XS VPN`, username, invID, amountRub, trafficGB, dashURL, settingsURL)
 
 	return s.send(to, subject, body)
 }
@@ -107,10 +107,10 @@ func (s *Sender) SendExpirationReminder(to, username string, daysLeft int, expir
 	var subject, when string
 	switch daysLeft {
 	case 1:
-		subject = "Подписка закончится завтра — VPN Panel"
+		subject = "Подписка закончится завтра — XS VPN"
 		when = "завтра"
 	default:
-		subject = fmt.Sprintf("Подписка закончится через %d дней — VPN Panel", daysLeft)
+		subject = fmt.Sprintf("Подписка закончится через %d дней — XS VPN", daysLeft)
 		when = fmt.Sprintf("через %d дней", daysLeft)
 	}
 
@@ -125,7 +125,7 @@ func (s *Sender) SendExpirationReminder(to, username string, daysLeft int, expir
 %s
 
 —
-VPN Panel`, username, when, expiresAt.Format("02.01.2006 15:04"), payURL, settingsURL)
+XS VPN`, username, when, expiresAt.Format("02.01.2006 15:04"), payURL, settingsURL)
 
 	return s.send(to, subject, body)
 }
@@ -136,7 +136,7 @@ VPN Panel`, username, when, expiresAt.Format("02.01.2006 15:04"), payURL, settin
 func (s *Sender) SendTrafficLowNotification(to, username string, remainingBytes int64, baseURL string) error {
 	payURL := strings.TrimRight(baseURL, "/") + "/pay"
 	settingsURL := strings.TrimRight(baseURL, "/") + "/settings"
-	subject := "Скоро закончится трафик — VPN Panel"
+	subject := "Скоро закончится трафик — XS VPN"
 	body := fmt.Sprintf(`Привет, %s!
 
 У вас осталось %s доступного трафика. Когда баланс обнулится, все VPN-профили
@@ -149,7 +149,7 @@ func (s *Sender) SendTrafficLowNotification(to, username string, remainingBytes 
 %s
 
 —
-VPN Panel`, username, formatBytes(remainingBytes), payURL, settingsURL)
+XS VPN`, username, formatBytes(remainingBytes), payURL, settingsURL)
 
 	return s.send(to, subject, body)
 }
@@ -192,7 +192,7 @@ func (s *Sender) SendBlockNotification(to, username, reason, baseURL string) err
 %s
 
 —
-VPN Panel`, username, payURL, settingsURL)
+XS VPN`, username, payURL, settingsURL)
 
 	default: // "balance"
 		subject = "Трафик закончился — VPN отключён"
@@ -207,7 +207,7 @@ VPN Panel`, username, payURL, settingsURL)
 %s
 
 —
-VPN Panel`, username, payURL, settingsURL)
+XS VPN`, username, payURL, settingsURL)
 	}
 
 	return s.send(to, subject, body)
@@ -220,7 +220,7 @@ VPN Panel`, username, payURL, settingsURL)
 func (s *Sender) SendProfileLimitNotification(to, username, profileName string, limitBytes int64, baseURL string) error {
 	dashURL := strings.TrimRight(baseURL, "/") + "/dashboard"
 	settingsURL := strings.TrimRight(baseURL, "/") + "/settings"
-	subject := fmt.Sprintf("Лимит профиля «%s» исчерпан — VPN Panel", profileName)
+	subject := fmt.Sprintf("Лимит профиля «%s» исчерпан — XS VPN", profileName)
 	body := fmt.Sprintf(`Привет, %s!
 
 На профиле «%s» был установлен лимит %s, и он исчерпан. Профиль отключён.
@@ -234,7 +234,7 @@ func (s *Sender) SendProfileLimitNotification(to, username, profileName string, 
 %s
 
 —
-VPN Panel`, username, profileName, formatBytes(limitBytes), dashURL, settingsURL)
+XS VPN`, username, profileName, formatBytes(limitBytes), dashURL, settingsURL)
 
 	return s.send(to, subject, body)
 }
@@ -255,7 +255,7 @@ IP:           %s
 %s
 
 —
-VPN Panel`, fromUsername, fromUserEmail, userIP, subject, message)
+XS VPN`, fromUsername, fromUserEmail, userIP, subject, message)
 
 	return s.sendWithReplyTo(to, fullSubject, body, fromUserEmail)
 }

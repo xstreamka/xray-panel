@@ -91,9 +91,9 @@ var migrations = []string{
 	// удалён, seed не сработает, и обратно они не вернутся.
 	`INSERT INTO tariffs (code, label, description, amount_rub, traffic_gb, is_popular, sort_order)
 	 SELECT * FROM (VALUES
-		('basic_10', '10 ГБ',  'VPN Panel 10 GB',  150::numeric, 10::numeric,  FALSE, 10),
-		('plus_30',  '30 ГБ',  'VPN Panel 30 GB',  300::numeric, 30::numeric,  TRUE,  20),
-		('pro_100',  '100 ГБ', 'VPN Panel 100 GB', 700::numeric, 100::numeric, FALSE, 30)
+		('basic_10', '10 ГБ',  'XS VPN 10 GB',  150::numeric, 10::numeric,  FALSE, 10),
+		('plus_30',  '30 ГБ',  'XS VPN 30 GB',  300::numeric, 30::numeric,  TRUE,  20),
+		('pro_100',  '100 ГБ', 'XS VPN 100 GB', 700::numeric, 100::numeric, FALSE, 30)
 	 ) AS t(code, label, description, amount_rub, traffic_gb, is_popular, sort_order)
 	 WHERE NOT EXISTS (SELECT 1 FROM tariffs)`,
 
@@ -200,7 +200,7 @@ END $$`,
 	// Сид одного addon-тарифа, если в таблице ещё нет ни одного аддона.
 	// Базовые подписочные тарифы засеваются выше с дефолтным kind='subscription'.
 	`INSERT INTO tariffs (code, label, description, amount_rub, traffic_gb, duration_days, kind, sort_order)
-	 SELECT 'topup_20', '+20 ГБ', 'VPN Panel addon 20 GB', 200::numeric, 20::numeric, 0, 'addon', 100
+	 SELECT 'topup_20', '+20 ГБ', 'XS VPN addon 20 GB', 200::numeric, 20::numeric, 0, 'addon', 100
 	 WHERE NOT EXISTS (SELECT 1 FROM tariffs WHERE kind = 'addon')`,
 
 	// ============================================
