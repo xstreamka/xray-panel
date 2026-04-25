@@ -190,6 +190,22 @@ func (s *InviteStore) SetActive(ctx context.Context, id int, active bool) error 
 	return nil
 }
 
+// UpdateNote меняет только заметку. Не трогает is_active/is_deleted —
+// заметку можно править даже у выключенного инвайта (для пометок «утечка»).
+func (s *InviteStore) UpdateNote(ctx context.Context, id int, note string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE invites SET note = $1, updated_at = NOW() WHERE id = $2`,
+		note, id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("invite %d not found", id)
+	}
+	return nil
+}
+
 // SoftDelete — пометить инвайт удалённым. Физически не удаляем: это бы рвало
 // связь с users.invite_id и ломало страницу «кто заинвайтился».
 func (s *InviteStore) SoftDelete(ctx context.Context, id int) error {

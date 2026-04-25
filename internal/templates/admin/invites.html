@@ -66,7 +66,8 @@
 {{if .Invites}}
 <div class="card">
     <h3 style="margin-top: 0;">Активные инвайты</h3>
-    <table>
+    <div style="overflow-x: auto;">
+    <table style="min-width: 900px;">
         <tr>
             <th>Ссылка / код</th>
             <th>Заметка</th>
@@ -90,7 +91,21 @@
                     {{end}}
                 </div>
             </td>
-            <td style="font-size: 0.85rem; color: #cbd5e1;">{{if .Note}}{{.Note}}{{else}}—{{end}}</td>
+            <td style="font-size: 0.85rem; color: #cbd5e1;">
+                <div style="display: flex; gap: 0.3rem; align-items: center;">
+                    <span data-invite-note-text>{{if .Note}}{{.Note}}{{else}}—{{end}}</span>
+                    {{if not .IsDeleted}}
+                    <button type="button" class="btn btn-sm" style="background: #475569; color: white; padding: 0.15rem 0.4rem;"
+                            data-edit-invite-note="{{.ID}}"
+                            data-current-note="{{.Note}}"
+                            title="Изменить заметку">✎</button>
+                    <form method="POST" action="/admin/invites/{{.ID}}/note" id="note-form-{{.ID}}" style="display: none;">
+                        {{template "csrf" $}}
+                        <input type="hidden" name="note" value="">
+                    </form>
+                    {{end}}
+                </div>
+            </td>
             <td style="font-size: 0.85rem;">{{if .CreatorLogin}}{{.CreatorLogin}}{{else}}<span style="color: #64748b;">—</span>{{end}}</td>
             <td>{{.Clicks}}</td>
             <td><a href="/admin/invites/{{.ID}}/users" style="color: #38bdf8;">{{.Registered}}</a></td>
@@ -132,6 +147,7 @@
         </tr>
         {{end}}
     </table>
+    </div>
 </div>
 {{else}}
 <div class="card">

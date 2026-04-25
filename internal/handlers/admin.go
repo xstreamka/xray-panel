@@ -994,6 +994,23 @@ func (h *AdminHandler) InviteToggle(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
 }
 
+// InviteUpdateNote — POST /admin/invites/{id}/note — поменять заметку.
+// Длина заметки ограничена 255 рунами (как в БД), пустая строка допустима.
+func (h *AdminHandler) InviteUpdateNote(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	note := strings.TrimSpace(r.FormValue("note"))
+	if utf8.RuneCountInString(note) > 255 {
+		http.Error(w, "Заметка слишком длинная (максимум 255 символов)", http.StatusBadRequest)
+		return
+	}
+	if err := h.invites.UpdateNote(r.Context(), id, note); err != nil {
+		log.Printf("Admin: invite update note error: %v", err)
+		http.Error(w, "Ошибка обновления заметки", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
+}
+
 // InviteDelete — POST /admin/invites/{id}/delete — soft-delete.
 // Физически строку не удаляем, чтобы страница «кто заинвайтился» не ломалась.
 func (h *AdminHandler) InviteDelete(w http.ResponseWriter, r *http.Request) {

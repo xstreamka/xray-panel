@@ -229,6 +229,7 @@ func main() {
 				r.Get("/admin/invites", adminHandler.InvitesList)
 				r.Post("/admin/invites", adminHandler.InviteCreate)
 				r.Post("/admin/invites/{id}/toggle", adminHandler.InviteToggle)
+				r.Post("/admin/invites/{id}/note", adminHandler.InviteUpdateNote)
 				r.Post("/admin/invites/{id}/delete", adminHandler.InviteDelete)
 				r.Get("/admin/invites/{id}/users", adminHandler.InviteUsers)
 				r.Post("/admin/settings/registration-mode", adminHandler.SetRegistrationMode)
