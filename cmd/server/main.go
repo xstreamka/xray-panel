@@ -136,6 +136,10 @@ func main() {
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Compress(5))
 	r.Use(middleware.SecurityHeaders(cfg.BaseURL))
+	// Глобальный лимит на тело запроса: 64 KiB. Все формы панели в это
+	// помещаются с запасом. Webhook идёт отдельно (вне группы), при необходимости
+	// получит свой лимит. /feedback ставит более жёсткий локальный MaxBytesReader.
+	r.Use(middleware.MaxBodyBytes(64 * 1024))
 
 	fs := http.FileServer(http.Dir("static"))
 	r.Handle("/static/*", http.StripPrefix("/static/", fs))

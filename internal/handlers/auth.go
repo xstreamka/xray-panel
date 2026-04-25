@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/mail"
+	"regexp"
 	"strings"
 
 	"xray-panel/internal/email"
@@ -59,6 +61,38 @@ const passwordLenError = "Пароль должен быть от 12 до 128 с
 
 func passwordLenValid(p string) bool {
 	return len(p) >= minPasswordLen && len(p) <= maxPasswordLen
+}
+
+// Лимиты на username/email — должны быть не больше колонок в БД (VARCHAR(100)/255),
+// плюс отрезаем явный мусор (DoS на index/SMTP/UI).
+const (
+	minUsernameLen = 3
+	maxUsernameLen = 32
+	maxEmailLen    = 254 // RFC 5321
+)
+
+// usernameRe — ASCII-only логин: буквы/цифры/-/_/. — никаких пробелов и unicode,
+// чтобы не плодить визуально-похожие имена и не ломать таблицы/логи.
+var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+func validateUsername(u string) string {
+	if l := len(u); l < minUsernameLen || l > maxUsernameLen {
+		return fmt.Sprintf("Логин должен быть от %d до %d символов", minUsernameLen, maxUsernameLen)
+	}
+	if !usernameRe.MatchString(u) {
+		return "Логин может содержать только латиницу, цифры, точки, дефисы и подчёркивания"
+	}
+	return ""
+}
+
+func validateEmail(e string) string {
+	if e == "" || len(e) > maxEmailLen {
+		return fmt.Sprintf("Email пустой или длиннее %d символов", maxEmailLen)
+	}
+	if _, err := mail.ParseAddress(e); err != nil {
+		return "Некорректный email"
+	}
+	return ""
 }
 
 func NewAuthHandler(users *models.UserStore, invites *models.InviteStore, auth *middleware.AuthMiddleware, renderer *Renderer, mailer *email.Sender, baseURL string, resetLimiter *middleware.RateLimiter) *AuthHandler {
@@ -223,11 +257,19 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	username := r.FormValue("username")
-	emailAddr := r.FormValue("email")
+	username := strings.TrimSpace(r.FormValue("username"))
+	emailAddr := strings.TrimSpace(r.FormValue("email"))
 	password := r.FormValue("password")
 	passwordConfirm := r.FormValue("password_confirm")
 
+	if msg := validateUsername(username); msg != "" {
+		renderWithErr(msg)
+		return
+	}
+	if msg := validateEmail(emailAddr); msg != "" {
+		renderWithErr(msg)
+		return
+	}
 	if password != passwordConfirm {
 		renderWithErr("Пароли не совпадают")
 		return

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"xray-panel/internal/config"
 	"xray-panel/internal/middleware"
@@ -308,9 +309,15 @@ func (h *DashboardHandler) CreateProfile(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	name := r.FormValue("name")
+	name := strings.TrimSpace(r.FormValue("name"))
 	if name == "" {
 		name = "default"
+	}
+	// Колонка name в БД — VARCHAR(100). Считаем по runes, чтобы emoji/кириллица
+	// не подрезались по байтам в неожиданных местах.
+	if utf8.RuneCountInString(name) > 64 {
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Имя профиля слишком длинное (максимум 64 символа).")
+		return
 	}
 
 	// limit_gb теперь опционален: это ЛОКАЛЬНЫЙ лимит устройства (parental).

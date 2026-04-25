@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -869,9 +870,19 @@ func parseTariffForm(r *http.Request) *models.Tariff {
 	}
 }
 
+// tariffCodeRe — code уезжает в URL pay-service как plan_id, поэтому жёстко
+// ограничиваем: ASCII lower/digits/underscore, без пробелов и unicode.
+var tariffCodeRe = regexp.MustCompile(`^[a-z0-9_]+$`)
+
 func validateTariff(t *models.Tariff) error {
 	if t.Code == "" || t.Label == "" || t.Description == "" {
 		return fmt.Errorf("заполните код, название и описание")
+	}
+	if len(t.Code) > 50 || !tariffCodeRe.MatchString(t.Code) {
+		return fmt.Errorf("код: до 50 символов, только латиница в нижнем регистре, цифры и _")
+	}
+	if utf8.RuneCountInString(t.Label) > 100 {
+		return fmt.Errorf("название не длиннее 100 символов")
 	}
 	if t.AmountRub <= 0 {
 		return fmt.Errorf("цена должна быть больше нуля")
