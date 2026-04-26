@@ -9,14 +9,15 @@ function copyTariff(btn) {
     if (!src || !dst) return;
 
     const names = ['kind', 'code', 'label', 'description',
-                   'amount_rub', 'traffic_gb', 'duration_days', 'sort_order'];
+                   'amount_rub', 'traffic_gb', 'duration_days', 'sort_order',
+                   'discount_percent'];
     for (const name of names) {
         const s = src.elements.namedItem(name);
         const d = dst.elements.namedItem(name);
         if (!s || !d) continue;
         d.value = name === 'code' ? s.value + '_copy' : s.value;
     }
-    for (const name of ['is_popular', 'is_discount', 'is_active']) {
+    for (const name of ['is_popular', 'is_active']) {
         const s = src.elements.namedItem(name);
         const d = dst.elements.namedItem(name);
         if (s && d) d.checked = s.checked;

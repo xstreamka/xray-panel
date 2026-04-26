@@ -845,6 +845,13 @@ func parseTariffForm(r *http.Request) *models.Tariff {
 	gb, _ := strconv.ParseFloat(r.FormValue("traffic_gb"), 64)
 	sortOrder, _ := strconv.Atoi(r.FormValue("sort_order"))
 	durationDays, _ := strconv.Atoi(r.FormValue("duration_days"))
+	discountPercent, _ := strconv.Atoi(r.FormValue("discount_percent"))
+	if discountPercent < 0 {
+		discountPercent = 0
+	}
+	if discountPercent > 100 {
+		discountPercent = 100
+	}
 
 	kind := models.TariffKind(strings.TrimSpace(r.FormValue("kind")))
 	if kind == "" {
@@ -857,17 +864,17 @@ func parseTariffForm(r *http.Request) *models.Tariff {
 	}
 
 	return &models.Tariff{
-		Code:         strings.TrimSpace(r.FormValue("code")),
-		Label:        strings.TrimSpace(r.FormValue("label")),
-		Description:  strings.TrimSpace(r.FormValue("description")),
-		AmountRub:    amount,
-		TrafficGB:    gb,
-		Kind:         kind,
-		DurationDays: durationDays,
-		IsPopular:    r.FormValue("is_popular") == "on",
-		IsDiscount:   r.FormValue("is_discount") == "on",
-		IsActive:     r.FormValue("is_active") == "on",
-		SortOrder:    sortOrder,
+		Code:            strings.TrimSpace(r.FormValue("code")),
+		Label:           strings.TrimSpace(r.FormValue("label")),
+		Description:     strings.TrimSpace(r.FormValue("description")),
+		AmountRub:       amount,
+		TrafficGB:       gb,
+		Kind:            kind,
+		DurationDays:    durationDays,
+		IsPopular:       r.FormValue("is_popular") == "on",
+		DiscountPercent: discountPercent,
+		IsActive:        r.FormValue("is_active") == "on",
+		SortOrder:       sortOrder,
 	}
 }
 

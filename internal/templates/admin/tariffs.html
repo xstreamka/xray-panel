@@ -45,13 +45,13 @@
                 <label>Порядок</label>
                 <input type="number" name="sort_order" value="100">
             </div>
+            <div class="field">
+                <label>Размер скидки, %</label>
+                <input type="number" min="0" max="100" name="discount_percent" value="0" placeholder="0">
+            </div>
             <div class="field-check">
                 <input type="checkbox" id="new-popular" name="is_popular">
                 <label for="new-popular">Популярный</label>
-            </div>
-            <div class="field-check">
-                <input type="checkbox" id="new-discount" name="is_discount">
-                <label for="new-discount">Скидка</label>
             </div>
             <div class="field-check">
                 <input type="checkbox" id="new-active" name="is_active" checked>
@@ -76,7 +76,7 @@
                 <span class="badge badge-yellow">докупка</span>
             {{end}}
             {{if .IsPopular}}<span class="badge badge-green">⭐ популярный</span>{{end}}
-            {{if .IsDiscount}}<span class="badge badge-yellow">💲 скидка</span>{{end}}
+            {{if gt .DiscountPercent 0}}<span class="badge badge-yellow">💲 скидка {{.DiscountPercent}}%</span>{{end}}
             {{if not .IsActive}}<span class="badge badge-red">отключён</span>{{end}}
         </div>
         <span style="color: #64748b; font-size: 0.8rem;">ID {{.ID}}</span>
@@ -120,13 +120,13 @@
                 <label>Порядок</label>
                 <input type="number" name="sort_order" value="{{.SortOrder}}">
             </div>
+            <div class="field">
+                <label>Размер скидки, %</label>
+                <input type="number" min="0" max="100" name="discount_percent" value="{{.DiscountPercent}}">
+            </div>
             <div class="field-check">
                 <input type="checkbox" id="pop-{{.ID}}" name="is_popular" {{if .IsPopular}}checked{{end}}>
                 <label for="pop-{{.ID}}">Популярный</label>
-            </div>
-            <div class="field-check">
-                <input type="checkbox" id="dis-{{.ID}}" name="is_discount" {{if .IsDiscount}}checked{{end}}>
-                <label for="dis-{{.ID}}">Скидка</label>
             </div>
             <div class="field-check">
                 <input type="checkbox" id="act-{{.ID}}" name="is_active" {{if .IsActive}}checked{{end}}>

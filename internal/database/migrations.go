@@ -197,9 +197,10 @@ END $$`,
 	// payment_receipts: денормализованное поле для фильтрации по виду тарифа
 	`ALTER TABLE payment_receipts ADD COLUMN IF NOT EXISTS tariff_kind VARCHAR(20)`,
 
-	// Шильдик «Скидка» — независимый от is_popular, оба могут быть выставлены
-	// одновременно (например, акционный тариф, который и так самый популярный).
-	`ALTER TABLE tariffs ADD COLUMN IF NOT EXISTS is_discount BOOLEAN NOT NULL DEFAULT FALSE`,
+	// Размер скидки в процентах. 0 — шильдик «Скидка» не показывается,
+	// > 0 — рисуется бейдж «💲 Скидка N%». Отдельного булева-флага нет:
+	// само ненулевое значение — индикатор того, что скидка активна.
+	`ALTER TABLE tariffs ADD COLUMN IF NOT EXISTS discount_percent INT NOT NULL DEFAULT 0`,
 
 	// Сид одного addon-тарифа, если в таблице ещё нет ни одного аддона.
 	// Базовые подписочные тарифы засеваются выше с дефолтным kind='subscription'.

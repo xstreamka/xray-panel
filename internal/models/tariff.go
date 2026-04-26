@@ -18,20 +18,20 @@ const (
 )
 
 type Tariff struct {
-	ID           int        `json:"id"`
-	Code         string     `json:"code"`
-	Label        string     `json:"label"`
-	Description  string     `json:"description"`
-	AmountRub    float64    `json:"amount_rub"`
-	TrafficGB    float64    `json:"traffic_gb"`
-	IsPopular    bool       `json:"is_popular"`
-	IsDiscount   bool       `json:"is_discount"`
-	IsActive     bool       `json:"is_active"`
-	SortOrder    int        `json:"sort_order"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	DurationDays int        `json:"duration_days"`
-	Kind         TariffKind `json:"kind"`
+	ID              int        `json:"id"`
+	Code            string     `json:"code"`
+	Label           string     `json:"label"`
+	Description     string     `json:"description"`
+	AmountRub       float64    `json:"amount_rub"`
+	TrafficGB       float64    `json:"traffic_gb"`
+	IsPopular       bool       `json:"is_popular"`
+	DiscountPercent int        `json:"discount_percent"`
+	IsActive        bool       `json:"is_active"`
+	SortOrder       int        `json:"sort_order"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	DurationDays    int        `json:"duration_days"`
+	Kind            TariffKind `json:"kind"`
 }
 
 type TariffStore struct {
@@ -44,7 +44,7 @@ func NewTariffStore(pool *pgxpool.Pool) *TariffStore {
 
 const tariffCols = `id, code, label, description, amount_rub, traffic_gb,
                     duration_days, kind,
-                    is_popular, is_discount, is_active, sort_order, created_at, updated_at`
+                    is_popular, discount_percent, is_active, sort_order, created_at, updated_at`
 
 func scanTariff(row interface {
 	Scan(dest ...any) error
@@ -52,7 +52,7 @@ func scanTariff(row interface {
 	return row.Scan(&t.ID, &t.Code, &t.Label, &t.Description,
 		&t.AmountRub, &t.TrafficGB,
 		&t.DurationDays, &t.Kind,
-		&t.IsPopular, &t.IsDiscount, &t.IsActive,
+		&t.IsPopular, &t.DiscountPercent, &t.IsActive,
 		&t.SortOrder, &t.CreatedAt, &t.UpdatedAt)
 }
 
@@ -108,12 +108,12 @@ func (s *TariffStore) Create(ctx context.Context, t *Tariff) error {
 	return s.pool.QueryRow(ctx,
 		`INSERT INTO tariffs (code, label, description, amount_rub, traffic_gb,
                       duration_days, kind,
-                      is_popular, is_discount, is_active, sort_order)
+                      is_popular, discount_percent, is_active, sort_order)
  			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
  			RETURNING id, created_at, updated_at`,
 		t.Code, t.Label, t.Description, t.AmountRub, t.TrafficGB,
 		t.DurationDays, string(t.Kind),
-		t.IsPopular, t.IsDiscount, t.IsActive, t.SortOrder,
+		t.IsPopular, t.DiscountPercent, t.IsActive, t.SortOrder,
 	).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 }
 
@@ -125,11 +125,13 @@ func (s *TariffStore) Update(ctx context.Context, t *Tariff) error {
 		`UPDATE tariffs
  				SET code=$1, label=$2, description=$3, amount_rub=$4, traffic_gb=$5,
      			duration_days=$6, kind=$7,
-     			is_popular=$8, is_discount=$9, is_active=$10, sort_order=$11, updated_at=NOW()
+     			is_popular=$8, discount_percent=$9,
+     			is_active=$10, sort_order=$11, updated_at=NOW()
  			WHERE id=$12`,
 		t.Code, t.Label, t.Description, t.AmountRub, t.TrafficGB,
 		t.DurationDays, string(t.Kind),
-		t.IsPopular, t.IsDiscount, t.IsActive, t.SortOrder, t.ID)
+		t.IsPopular, t.DiscountPercent,
+		t.IsActive, t.SortOrder, t.ID)
 	if err != nil {
 		return err
 	}
