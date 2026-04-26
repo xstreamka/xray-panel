@@ -16,7 +16,7 @@ function copyTariff(btn) {
         if (!s || !d) continue;
         d.value = name === 'code' ? s.value + '_copy' : s.value;
     }
-    for (const name of ['is_popular', 'is_active']) {
+    for (const name of ['is_popular', 'is_discount', 'is_active']) {
         const s = src.elements.namedItem(name);
         const d = dst.elements.namedItem(name);
         if (s && d) d.checked = s.checked;

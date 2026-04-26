@@ -154,7 +154,13 @@
 
 <div class="tariffs">
     {{range .SubscriptionTariffs}}
-    <div class="tariff{{if .IsPopular}} popular{{end}}">
+    <div class="tariff{{if .IsPopular}} popular{{end}}{{if .IsDiscount}} discount{{end}}">
+        {{if or .IsPopular .IsDiscount}}
+        <div class="tariff-badges">
+            {{if .IsDiscount}}<span class="tariff-badge discount">💲 Скидка</span>{{end}}
+            {{if .IsPopular}}<span class="tariff-badge popular">⭐ Популярный</span>{{end}}
+        </div>
+        {{end}}
         <h3>{{.Label}}</h3>
         <div class="price">
             {{printf "%.0f" .AmountRub}} ₽
@@ -181,7 +187,13 @@
 
 <div class="tariffs">
     {{range .AddonTariffs}}
-    <div class="tariff{{if .IsPopular}} popular{{end}}">
+    <div class="tariff{{if .IsPopular}} popular{{end}}{{if .IsDiscount}} discount{{end}}">
+        {{if or .IsPopular .IsDiscount}}
+        <div class="tariff-badges">
+            {{if .IsDiscount}}<span class="tariff-badge discount">💲 Скидка</span>{{end}}
+            {{if .IsPopular}}<span class="tariff-badge popular">⭐ Популярный</span>{{end}}
+        </div>
+        {{end}}
         <h3>{{.Label}}</h3>
         <div class="price">
             {{printf "%.0f" .AmountRub}} ₽

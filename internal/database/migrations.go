@@ -197,6 +197,10 @@ END $$`,
 	// payment_receipts: денормализованное поле для фильтрации по виду тарифа
 	`ALTER TABLE payment_receipts ADD COLUMN IF NOT EXISTS tariff_kind VARCHAR(20)`,
 
+	// Шильдик «Скидка» — независимый от is_popular, оба могут быть выставлены
+	// одновременно (например, акционный тариф, который и так самый популярный).
+	`ALTER TABLE tariffs ADD COLUMN IF NOT EXISTS is_discount BOOLEAN NOT NULL DEFAULT FALSE`,
+
 	// Сид одного addon-тарифа, если в таблице ещё нет ни одного аддона.
 	// Базовые подписочные тарифы засеваются выше с дефолтным kind='subscription'.
 	`INSERT INTO tariffs (code, label, description, amount_rub, traffic_gb, duration_days, kind, sort_order)

@@ -54,6 +54,28 @@ label { display: block; margin-bottom: 0.3rem; color: #94a3b8; font-size: 0.85re
 .badge-gray { background: #475569; color: #94a3b8; }
 .badge-red { background: #7f1d1d; color: #fca5a5; }
 .badge-yellow { background: #713f12; color: #fcd34d; }
+
+/* Шильдики тарифов: общий контейнер сверху карточки. Используется и на /dashboard,
+   и на /pay — стиль один. Карточке-родителю нужно position: relative. */
+.tariff-badges {
+    position: absolute;
+    top: -12px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    pointer-events: none;
+}
+.tariff-badge {
+    padding: 0.2rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.tariff-badge.popular { background: #3b82f6; color: #fff; }
+.tariff-badge.discount { background: #f59e0b; color: #0f172a; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 0.6rem; border-bottom: 1px solid #334155; }
 th { color: #94a3b8; font-size: 0.85rem; }

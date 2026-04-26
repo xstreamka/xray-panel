@@ -865,6 +865,7 @@ func parseTariffForm(r *http.Request) *models.Tariff {
 		Kind:         kind,
 		DurationDays: durationDays,
 		IsPopular:    r.FormValue("is_popular") == "on",
+		IsDiscount:   r.FormValue("is_discount") == "on",
 		IsActive:     r.FormValue("is_active") == "on",
 		SortOrder:    sortOrder,
 	}
