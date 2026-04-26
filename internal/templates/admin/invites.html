@@ -72,7 +72,7 @@
             <th>Ссылка / код</th>
             <th>Заметка</th>
             <th>Автор</th>
-            <th>Переходы<br>Регистрации<br>Verified</th>
+            <th>Переходы<br>Регистрации<br>Verified<br>Купили подписку</th>
             <th>Статус</th>
             <th>Создан</th>
             <th>Действия</th>
@@ -105,7 +105,7 @@
                 </div>
             </td>
             <td style="font-size: 0.85rem;">{{if .CreatorLogin}}{{.CreatorLogin}}{{else}}<span style="color: #64748b;">—</span>{{end}}</td>
-            <td>{{.Clicks}} / <a href="/admin/invites/{{.ID}}/users" style="color: #38bdf8;">{{.Registered}}</a> / {{.Verified}}</td>
+            <td>{{.Clicks}} / <a href="/admin/invites/{{.ID}}/users" style="color: #38bdf8;">{{.Registered}}</a> / {{.Verified}} / {{.Paid}}</td>
             <td>
                 {{if .IsDeleted}}
                     <span class="badge badge-red">удалён</span>
