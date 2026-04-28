@@ -22,11 +22,12 @@ type Config struct {
 	TrustedProxies string
 
 	// PostgreSQL
-	DBHost string
-	DBPort string
-	DBUser string
-	DBPass string
-	DBName string
+	DBHost    string
+	DBPort    string
+	DBUser    string
+	DBPass    string
+	DBName    string
+	DBSSLMode string // disable | require | verify-ca | verify-full | prefer | allow
 
 	// SMTP
 	SMTPHost     string
@@ -79,11 +80,12 @@ func Load() (*Config, error) {
 
 		TrustedProxies: getEnv("TRUSTED_PROXIES", ""),
 
-		DBHost: getEnv("DB_HOST", "127.0.0.1"),
-		DBPort: getEnv("DB_PORT", "5432"),
-		DBUser: getEnv("DB_USER", "vpnpanel"),
-		DBPass: getEnv("DB_PASS", ""),
-		DBName: getEnv("DB_NAME", "vpnpanel"),
+		DBHost:    getEnv("DB_HOST", "127.0.0.1"),
+		DBPort:    getEnv("DB_PORT", "5432"),
+		DBUser:    getEnv("DB_USER", "vpnpanel"),
+		DBPass:    getEnv("DB_PASS", ""),
+		DBName:    getEnv("DB_NAME", "vpnpanel"),
+		DBSSLMode: getEnv("DB_SSLMODE", ""),
 
 		SMTPHost:     getEnv("SMTP_HOST", ""),
 		SMTPPort:     getEnv("SMTP_PORT", "587"),
@@ -136,13 +138,26 @@ func Load() (*Config, error) {
 // DSN собирает URL подключения к Postgres. Юзер и пароль прогоняем через
 // url.UserPassword, иначе любой символ, который в URL имеет специальное значение
 // (%, @, :, /, пробел и т.п.), ломает парсер pgx с "invalid URL escape".
+//
+// SSL режим: если задан явно через DB_SSLMODE — используем его. Иначе авто:
+// для локальных адресов (127.0.0.1, ::1, localhost) — disable, для удалённых
+// БД — require, чтобы пароль не передавался plaintext через сеть.
 func (c *Config) DSN() string {
+	sslmode := c.DBSSLMode
+	if sslmode == "" {
+		switch c.DBHost {
+		case "127.0.0.1", "::1", "localhost":
+			sslmode = "disable"
+		default:
+			sslmode = "require"
+		}
+	}
 	u := url.URL{
 		Scheme:   "postgres",
 		User:     url.UserPassword(c.DBUser, c.DBPass),
 		Host:     fmt.Sprintf("%s:%s", c.DBHost, c.DBPort),
 		Path:     c.DBName,
-		RawQuery: "sslmode=disable",
+		RawQuery: "sslmode=" + sslmode,
 	}
 	return u.String()
 }

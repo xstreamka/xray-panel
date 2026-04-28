@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
-	"io"
 	"log"
 	"net/http"
 	"path/filepath"
 	"sync"
+
+	"xray-panel/internal/middleware"
 )
 
 type Renderer struct {
@@ -64,9 +65,10 @@ func (r *Renderer) loadAll() error {
 }
 
 // Render выполняет шаблон, пишет в буфер, при ошибке отдаёт 500 и логирует.
-// Если w — http.ResponseWriter, предпочтительнее пользоваться этим методом,
-// потому что частичный HTML клиенту уходить не будет.
-func (r *Renderer) Render(w io.Writer, name string, data any) error {
+// Принимает *http.Request, чтобы достать CSRF-токен из контекста и положить его
+// в data под ключом CSRFToken — шаблоны вставляют его в формы через
+// {{template "csrf" .}}.
+func (r *Renderer) Render(w http.ResponseWriter, req *http.Request, name string, data map[string]any) error {
 	r.mu.RLock()
 	tmpl, ok := r.templates[name]
 	r.mu.RUnlock()
@@ -74,18 +76,23 @@ func (r *Renderer) Render(w io.Writer, name string, data any) error {
 	if !ok {
 		err := fmt.Errorf("template %s not found", name)
 		log.Printf("Renderer: %v", err)
-		if rw, ok := w.(http.ResponseWriter); ok {
-			http.Error(rw, "Internal error", http.StatusInternalServerError)
-		}
+		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return err
+	}
+
+	if data == nil {
+		data = map[string]any{}
+	}
+	if req != nil {
+		if t := middleware.CSRFTokenFromContext(req.Context()); t != "" {
+			data["CSRFToken"] = t
+		}
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&buf, "base", data); err != nil {
 		log.Printf("Renderer: execute %s failed: %v", name, err)
-		if rw, ok := w.(http.ResponseWriter); ok {
-			http.Error(rw, "Internal error", http.StatusInternalServerError)
-		}
+		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return err
 	}
 

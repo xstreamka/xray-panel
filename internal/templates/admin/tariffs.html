@@ -8,6 +8,7 @@
 <div class="card">
     <h3 style="margin-bottom: 1rem;">Новый тариф</h3>
     <form id="new-tariff-form" method="POST" action="/admin/tariffs">
+                {{template "csrf" $}}
         <div class="form-grid">
             <div class="field">
                 <label>Тип</label>
@@ -26,7 +27,7 @@
             </div>
             <div class="field">
                 <label>Описание (для чека)</label>
-                <input type="text" name="description" placeholder="VPN Panel 10 GB" required>
+                <input type="text" name="description" placeholder="XS VPN 10 GB" required>
             </div>
             <div class="field">
                 <label>Цена, ₽</label>
@@ -43,6 +44,10 @@
             <div class="field">
                 <label>Порядок</label>
                 <input type="number" name="sort_order" value="100">
+            </div>
+            <div class="field">
+                <label>Размер скидки, %</label>
+                <input type="number" min="0" max="100" name="discount_percent" value="0" placeholder="0">
             </div>
             <div class="field-check">
                 <input type="checkbox" id="new-popular" name="is_popular">
@@ -71,12 +76,14 @@
                 <span class="badge badge-yellow">докупка</span>
             {{end}}
             {{if .IsPopular}}<span class="badge badge-green">⭐ популярный</span>{{end}}
+            {{if gt .DiscountPercent 0}}<span class="badge badge-yellow">💲 скидка {{.DiscountPercent}}%</span>{{end}}
             {{if not .IsActive}}<span class="badge badge-red">отключён</span>{{end}}
         </div>
         <span style="color: #64748b; font-size: 0.8rem;">ID {{.ID}}</span>
     </div>
 
     <form method="POST" action="/admin/tariffs/{{.ID}}">
+                {{template "csrf" $}}
         <div class="form-grid">
             <div class="field">
                 <label>Тип</label>
@@ -113,6 +120,10 @@
                 <label>Порядок</label>
                 <input type="number" name="sort_order" value="{{.SortOrder}}">
             </div>
+            <div class="field">
+                <label>Размер скидки, %</label>
+                <input type="number" min="0" max="100" name="discount_percent" value="{{.DiscountPercent}}">
+            </div>
             <div class="field-check">
                 <input type="checkbox" id="pop-{{.ID}}" name="is_popular" {{if .IsPopular}}checked{{end}}>
                 <label for="pop-{{.ID}}">Популярный</label>
@@ -125,18 +136,20 @@
         <div class="form-actions">
             <button type="submit" class="btn btn-primary">Сохранить</button>
             <button type="button" class="btn btn-sm" style="background: #475569; color: white;"
-                    onclick="copyTariff(this)"
+                    data-copy-tariff
                     title="Скопировать поля в форму создания сверху">
                 Копировать
             </button>
             <span class="spacer"></span>
             <button type="button" class="btn btn-sm btn-danger"
-                    onclick="if(confirm('Удалить тариф {{.Code}}? Это необратимо.')) document.getElementById('del-{{.ID}}').submit();">
+                    data-delete-tariff="del-{{.ID}}"
+                    data-tariff-code="{{.Code}}">
                 Удалить
             </button>
         </div>
     </form>
-    <form id="del-{{.ID}}" method="POST" action="/admin/tariffs/{{.ID}}/delete" style="display: none;"></form>
+    <form id="del-{{.ID}}" method="POST" action="/admin/tariffs/{{.ID}}/delete" style="display: none;">
+                {{template "csrf" $}}</form>
 </div>
 {{end}}
 

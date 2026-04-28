@@ -16,15 +16,16 @@
             {{end}}
             {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
             <form method="POST" action="/register{{if .InviteCode}}?invite={{.InviteCode}}{{end}}">
+                {{template "csrf" $}}
                 {{if .InviteCode}}<input type="hidden" name="invite" value="{{.InviteCode}}">{{end}}
                 <label for="username">Логин</label>
-                <input type="text" id="username" name="username" required autofocus value="{{.Username}}">
+                <input type="text" id="username" name="username" required autofocus minlength="3" maxlength="32" pattern="[a-zA-Z0-9._\-]+" title="Латиница, цифры, точки, дефисы, подчёркивания" value="{{.Username}}">
                 <label for="email">Email</label>
-                <input type="email" id="email" name="email" required value="{{.EmailVal}}">
+                <input type="email" id="email" name="email" required maxlength="254" value="{{.EmailVal}}">
                 <label for="password">Пароль</label>
-                <input type="password" id="password" name="password" required minlength="6">
+                <input type="password" id="password" name="password" required minlength="12" maxlength="128">
                 <label for="password_confirm">Пароль ещё раз</label>
-                <input type="password" id="password_confirm" name="password_confirm" required minlength="6">
+                <input type="password" id="password_confirm" name="password_confirm" required minlength="12" maxlength="128">
                 <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;">Зарегистрироваться</button>
             </form>
         {{else if eq .StateKind "disabled"}}

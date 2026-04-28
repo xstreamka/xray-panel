@@ -46,6 +46,7 @@ type Invite struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 	Registered   int       `json:"registered"` // юзеров по инвайту (агрегат)
 	Verified     int       `json:"verified"`   // из них с подтверждённым email
+	Paid         int       `json:"paid"`       // из них купивших подписку (≥1 квитанция subscription)
 	CreatorLogin *string   `json:"creator_login,omitempty"`
 }
 
@@ -139,7 +140,8 @@ func (s *InviteStore) List(ctx context.Context) ([]Invite, error) {
 		        i.created_by, i.created_at, i.updated_at,
 		        COALESCE(u_creator.username, NULL) AS creator_login,
 		        COALESCE(agg.registered, 0) AS registered,
-		        COALESCE(agg.verified, 0)   AS verified
+		        COALESCE(agg.verified, 0)   AS verified,
+		        COALESCE(paid.paid, 0)      AS paid
 		   FROM invites i
 		   LEFT JOIN users u_creator ON u_creator.id = i.created_by
 		   LEFT JOIN (
@@ -150,6 +152,15 @@ func (s *InviteStore) List(ctx context.Context) ([]Invite, error) {
 		         WHERE invite_id IS NOT NULL
 		         GROUP BY invite_id
 		   ) agg ON agg.invite_id = i.id
+		   LEFT JOIN (
+		        SELECT u.invite_id,
+		               COUNT(DISTINCT u.id) AS paid
+		          FROM users u
+		          JOIN payment_receipts pr ON pr.user_id = u.id
+		         WHERE u.invite_id IS NOT NULL
+		           AND pr.tariff_kind = 'subscription'
+		         GROUP BY u.invite_id
+		   ) paid ON paid.invite_id = i.id
 		  ORDER BY i.is_deleted ASC, i.id DESC`,
 	)
 	if err != nil {
@@ -164,7 +175,7 @@ func (s *InviteStore) List(ctx context.Context) ([]Invite, error) {
 			&inv.ID, &inv.Code, &inv.Note, &inv.IsActive, &inv.IsDeleted, &inv.Clicks,
 			&inv.CreatedBy, &inv.CreatedAt, &inv.UpdatedAt,
 			&inv.CreatorLogin,
-			&inv.Registered, &inv.Verified,
+			&inv.Registered, &inv.Verified, &inv.Paid,
 		); err != nil {
 			return nil, err
 		}
@@ -180,6 +191,22 @@ func (s *InviteStore) SetActive(ctx context.Context, id int, active bool) error 
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE invites SET is_active = $1, updated_at = NOW() WHERE id = $2`,
 		active, id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("invite %d not found", id)
+	}
+	return nil
+}
+
+// UpdateNote меняет только заметку. Не трогает is_active/is_deleted —
+// заметку можно править даже у выключенного инвайта (для пометок «утечка»).
+func (s *InviteStore) UpdateNote(ctx context.Context, id int, note string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE invites SET note = $1, updated_at = NOW() WHERE id = $2`,
+		note, id,
 	)
 	if err != nil {
 		return err

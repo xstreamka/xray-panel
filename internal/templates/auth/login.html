@@ -9,6 +9,7 @@
         <h2 style="margin-bottom: 1.5rem; text-align: center;">Вход</h2>
         {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
         <form method="POST" action="/login">
+                {{template "csrf" $}}
             <label for="username">Логин</label>
             <input type="text" id="username" name="username" required autofocus>
             <label for="password">Пароль</label>

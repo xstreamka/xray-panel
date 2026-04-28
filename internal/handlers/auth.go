@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/mail"
+	"regexp"
 	"strings"
 
 	"xray-panel/internal/email"
@@ -47,6 +49,52 @@ const (
 	ResetLimitWindow = "час"
 )
 
+// Минимум 12 — современный baseline. Максимум 128 — защита от DoS на bcrypt:
+// длинные пароли заставляют bcrypt считать дольше, можно положить процессор
+// серией параллельных регистраций.
+const (
+	minPasswordLen = 12
+	maxPasswordLen = 128
+)
+
+const passwordLenError = "Пароль должен быть от 12 до 128 символов"
+
+func passwordLenValid(p string) bool {
+	return len(p) >= minPasswordLen && len(p) <= maxPasswordLen
+}
+
+// Лимиты на username/email — должны быть не больше колонок в БД (VARCHAR(100)/255),
+// плюс отрезаем явный мусор (DoS на index/SMTP/UI).
+const (
+	minUsernameLen = 3
+	maxUsernameLen = 32
+	maxEmailLen    = 254 // RFC 5321
+)
+
+// usernameRe — ASCII-only логин: буквы/цифры/-/_/. — никаких пробелов и unicode,
+// чтобы не плодить визуально-похожие имена и не ломать таблицы/логи.
+var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+func validateUsername(u string) string {
+	if l := len(u); l < minUsernameLen || l > maxUsernameLen {
+		return fmt.Sprintf("Логин должен быть от %d до %d символов", minUsernameLen, maxUsernameLen)
+	}
+	if !usernameRe.MatchString(u) {
+		return "Логин может содержать только латиницу, цифры, точки, дефисы и подчёркивания"
+	}
+	return ""
+}
+
+func validateEmail(e string) string {
+	if e == "" || len(e) > maxEmailLen {
+		return fmt.Sprintf("Email пустой или длиннее %d символов", maxEmailLen)
+	}
+	if _, err := mail.ParseAddress(e); err != nil {
+		return "Некорректный email"
+	}
+	return ""
+}
+
 func NewAuthHandler(users *models.UserStore, invites *models.InviteStore, auth *middleware.AuthMiddleware, renderer *Renderer, mailer *email.Sender, baseURL string, resetLimiter *middleware.RateLimiter) *AuthHandler {
 	return &AuthHandler{users: users, invites: invites, auth: auth, renderer: renderer, mailer: mailer, baseURL: baseURL, resetLimiter: resetLimiter}
 }
@@ -62,7 +110,7 @@ func (h *AuthHandler) LoginPage(w http.ResponseWriter, r *http.Request) {
 	// когда открытая регистрация действительно доступна.
 	mode, _ := h.invites.GetRegistrationMode(r.Context())
 	data["ShowRegisterLink"] = (mode == models.RegModeOpen || mode == models.RegModeBoth)
-	h.renderer.Render(w, "login.html", data)
+	h.renderer.Render(w, r, "login.html", data)
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +127,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			errMsg = msgUserDeactivated
 		}
 		mode, _ := h.invites.GetRegistrationMode(r.Context())
-		h.renderer.Render(w, "login.html", map[string]any{
+		h.renderer.Render(w, r, "login.html", map[string]any{
 			"Error":            errMsg,
 			"ShowRegisterLink": mode == models.RegModeOpen || mode == models.RegModeBoth,
 		})
@@ -175,7 +223,7 @@ func (h *AuthHandler) RegisterPage(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Invite %d: increment clicks failed: %v", acc.Invite.ID, err)
 		}
 	}
-	h.renderer.Render(w, "register.html", data)
+	h.renderer.Render(w, r, "register.html", data)
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -195,13 +243,13 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		if acc.Invite != nil {
 			data["InviteCode"] = acc.Invite.Code
 		}
-		h.renderer.Render(w, "register.html", data)
+		h.renderer.Render(w, r, "register.html", data)
 	}
 
 	if !acc.Allow {
 		// Попытка POST в закрытом режиме — просто перерисовываем страницу
 		// в её текущем «не-форма» состоянии.
-		h.renderer.Render(w, "register.html", map[string]any{
+		h.renderer.Render(w, r, "register.html", map[string]any{
 			"Mode":      acc.Mode,
 			"StateKind": acc.StateKind,
 			"Allow":     false,
@@ -209,17 +257,25 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	username := r.FormValue("username")
-	emailAddr := r.FormValue("email")
+	username := strings.TrimSpace(r.FormValue("username"))
+	emailAddr := strings.TrimSpace(r.FormValue("email"))
 	password := r.FormValue("password")
 	passwordConfirm := r.FormValue("password_confirm")
 
+	if msg := validateUsername(username); msg != "" {
+		renderWithErr(msg)
+		return
+	}
+	if msg := validateEmail(emailAddr); msg != "" {
+		renderWithErr(msg)
+		return
+	}
 	if password != passwordConfirm {
 		renderWithErr("Пароли не совпадают")
 		return
 	}
-	if len(password) < 6 {
-		renderWithErr("Пароль минимум 6 символов")
+	if !passwordLenValid(password) {
+		renderWithErr(passwordLenError)
 		return
 	}
 
@@ -237,14 +293,13 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Отправляем письмо верификации
 	if h.mailer != nil {
-		go func() {
-			if err := h.mailer.SendVerification(emailAddr, token, h.baseURL); err != nil {
-				log.Printf("Failed to send verification email to %s: %v", emailAddr, err)
-			}
-		}()
+		h.mailer.Submit("verification email to "+emailAddr, func() error {
+			return h.mailer.SendVerification(emailAddr, token, h.baseURL)
+		})
 	} else {
-		// SMTP не настроен — логируем токен для ручной верификации
-		log.Printf("SMTP not configured. Verify URL: %s/verify?token=%s", h.baseURL, token)
+		// SMTP не настроен — НЕ логируем токен (он бы утёк в любой агрегатор логов).
+		// В dev админ может выдернуть его прямо из БД: SELECT verify_token FROM users WHERE id = N.
+		log.Printf("SMTP not configured: verification email NOT sent for user_id=%d (%s). Set SMTP_* envs.", user.ID, emailAddr)
 	}
 
 	h.auth.SetSession(w, user.ID)
@@ -262,7 +317,7 @@ func (h *AuthHandler) VerifyPendingPage(w http.ResponseWriter, r *http.Request) 
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	h.renderer.Render(w, "verify_pending.html", map[string]any{
+	h.renderer.Render(w, r, "verify_pending.html", map[string]any{
 		"User": user,
 	})
 }
@@ -282,7 +337,7 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 	token, emailAddr, err := h.users.RegenerateVerifyToken(r.Context(), user.ID)
 	if err != nil {
 		log.Printf("Resend verification failed for user %d: %v", user.ID, err)
-		h.renderer.Render(w, "verify_pending.html", map[string]any{
+		h.renderer.Render(w, r, "verify_pending.html", map[string]any{
 			"User":  user,
 			"Error": "Не удалось отправить письмо, попробуйте позже",
 		})
@@ -290,16 +345,14 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 	}
 
 	if h.mailer != nil {
-		go func() {
-			if err := h.mailer.SendVerification(emailAddr, token, h.baseURL); err != nil {
-				log.Printf("Failed to resend verification to %s: %v", emailAddr, err)
-			}
-		}()
+		h.mailer.Submit("resend verification to "+emailAddr, func() error {
+			return h.mailer.SendVerification(emailAddr, token, h.baseURL)
+		})
 	} else {
-		log.Printf("SMTP not configured. Verify URL: %s/verify?token=%s", h.baseURL, token)
+		log.Printf("SMTP not configured: verification email NOT sent for user_id=%d. Set SMTP_* envs.", user.ID)
 	}
 
-	h.renderer.Render(w, "verify_pending.html", map[string]any{
+	h.renderer.Render(w, r, "verify_pending.html", map[string]any{
 		"User":    user,
 		"Success": "Письмо отправлено повторно",
 	})
@@ -309,7 +362,7 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		h.renderer.Render(w, "verify_result.html", map[string]any{
+		h.renderer.Render(w, r, "verify_result.html", map[string]any{
 			"Error": "Токен не указан",
 		})
 		return
@@ -318,7 +371,7 @@ func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	user, err := h.users.VerifyEmail(r.Context(), token)
 	if err != nil {
 		log.Printf("Email verification failed: %v", err)
-		h.renderer.Render(w, "verify_result.html", map[string]any{
+		h.renderer.Render(w, r, "verify_result.html", map[string]any{
 			"Error": "Недействительная или просроченная ссылка",
 		})
 		return
@@ -327,7 +380,7 @@ func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	// Устанавливаем сессию (если не было)
 	h.auth.SetSession(w, user.ID)
 
-	h.renderer.Render(w, "verify_result.html", map[string]any{
+	h.renderer.Render(w, r, "verify_result.html", map[string]any{
 		"Success": true,
 		"User":    user,
 	})
@@ -340,7 +393,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 // ForgotPasswordPage — GET-форма запроса восстановления (логин или email).
 func (h *AuthHandler) ForgotPasswordPage(w http.ResponseWriter, r *http.Request) {
-	h.renderer.Render(w, "forgot_password.html", map[string]any{
+	h.renderer.Render(w, r, "forgot_password.html", map[string]any{
 		"LimitMax":    ResetLimitMax,
 		"LimitWindow": ResetLimitWindow,
 	})
@@ -354,7 +407,7 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	loginOrEmail := strings.TrimSpace(r.FormValue("login_or_email"))
 
 	if h.resetLimiter != nil && !h.resetLimiter.Allow(rateLimitKey(r)) {
-		h.renderer.Render(w, "forgot_password.html", map[string]any{
+		h.renderer.Render(w, r, "forgot_password.html", map[string]any{
 			"LimitMax":     ResetLimitMax,
 			"LimitWindow":  ResetLimitWindow,
 			"Error":        fmt.Sprintf("Превышен лимит — не более %d запросов в %s. Попробуйте позже.", ResetLimitMax, ResetLimitWindow),
@@ -364,7 +417,7 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if loginOrEmail == "" {
-		h.renderer.Render(w, "forgot_password.html", map[string]any{
+		h.renderer.Render(w, r, "forgot_password.html", map[string]any{
 			"LimitMax":    ResetLimitMax,
 			"LimitWindow": ResetLimitWindow,
 			"Error":       "Укажите логин или email",
@@ -374,7 +427,7 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 
 	userID, emailAddr, token, err := h.users.CreateResetToken(r.Context(), loginOrEmail)
 	if errors.Is(err, models.ErrUserDeactivated) {
-		h.renderer.Render(w, "forgot_password.html", map[string]any{
+		h.renderer.Render(w, r, "forgot_password.html", map[string]any{
 			"LimitMax":     ResetLimitMax,
 			"LimitWindow":  ResetLimitWindow,
 			"Error":        template.HTML("Пользователь выключен.<br>Восстановление пароля невозможно, обратитесь к администратору."),
@@ -387,33 +440,72 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if userID != nil && token != "" {
 		if h.mailer != nil {
-			go func() {
-				if sendErr := h.mailer.SendPasswordReset(emailAddr, token, h.baseURL); sendErr != nil {
-					log.Printf("Failed to send password reset to %s: %v", emailAddr, sendErr)
-				}
-			}()
+			h.mailer.Submit("password reset to "+emailAddr, func() error {
+				return h.mailer.SendPasswordReset(emailAddr, token, h.baseURL)
+			})
 		} else {
-			log.Printf("SMTP not configured. Password reset URL: %s/reset?token=%s", h.baseURL, token)
+			// Токен в лог не пишем — в dev можно достать из users.reset_token по userID.
+			log.Printf("SMTP not configured: password reset email NOT sent for user_id=%d. Set SMTP_* envs.", *userID)
 		}
 	}
 
-	h.renderer.Render(w, "forgot_password.html", map[string]any{
+	h.renderer.Render(w, r, "forgot_password.html", map[string]any{
 		"LimitMax":    ResetLimitMax,
 		"LimitWindow": ResetLimitWindow,
 		"Success":     "Если такой аккаунт существует, мы отправили письмо со ссылкой для восстановления. Проверьте почту (в т.ч. папку «Спам»). Ссылка действует 1 час.",
 	})
 }
 
-// ResetPasswordPage — GET /reset?token=xxx, форма ввода нового пароля.
+// resetCookieName — короткоживущая HttpOnly cookie с токеном восстановления.
+// Токен изначально приходит GET-параметром из письма (?token=xxx) — это утечка
+// в access-логи и Referer. На первом GET перекладываем токен в cookie и редиректим
+// на /reset без параметра, чтобы дальше токен жил только в cookie и hidden-поле формы.
+const resetCookieName = "pwreset"
+
+func (h *AuthHandler) setResetCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     resetCookieName,
+		Value:    token,
+		Path:     "/reset",
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(strings.ToLower(h.baseURL), "https://"),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   3600, // 1 час — совпадает с TTL токена в БД
+	})
+}
+
+func (h *AuthHandler) clearResetCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     resetCookieName,
+		Value:    "",
+		Path:     "/reset",
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(strings.ToLower(h.baseURL), "https://"),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+}
+
+// ResetPasswordPage — GET /reset[?token=xxx]. Если token пришёл параметром,
+// переносим его в HttpOnly cookie и редиректим на /reset, чтобы убрать токен
+// из URL (логи nginx, history, Referer на внешние ссылки).
 func (h *AuthHandler) ResetPasswordPage(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
+	if token := r.URL.Query().Get("token"); token != "" {
+		h.setResetCookie(w, token)
+		http.Redirect(w, r, "/reset", http.StatusSeeOther)
+		return
+	}
+	token := ""
+	if c, err := r.Cookie(resetCookieName); err == nil {
+		token = c.Value
+	}
 	if token == "" {
-		h.renderer.Render(w, "reset_password.html", map[string]any{
-			"Error": "Токен не указан",
+		h.renderer.Render(w, r, "reset_password.html", map[string]any{
+			"Error": "Токен не указан или истёк. Запросите восстановление заново.",
 		})
 		return
 	}
-	h.renderer.Render(w, "reset_password.html", map[string]any{
+	h.renderer.Render(w, r, "reset_password.html", map[string]any{
 		"Token": token,
 	})
 }
@@ -421,26 +513,32 @@ func (h *AuthHandler) ResetPasswordPage(w http.ResponseWriter, r *http.Request) 
 // ResetPassword — POST: проверка и установка нового пароля.
 func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	token := r.FormValue("token")
+	if token == "" {
+		// Fallback: hidden-поле могло потеряться (старая вкладка), но cookie ещё жива.
+		if c, err := r.Cookie(resetCookieName); err == nil {
+			token = c.Value
+		}
+	}
 	password := r.FormValue("password")
 	passwordConfirm := r.FormValue("password_confirm")
 
 	if token == "" {
-		h.renderer.Render(w, "reset_password.html", map[string]any{
+		h.renderer.Render(w, r, "reset_password.html", map[string]any{
 			"Error": "Токен не указан",
 		})
 		return
 	}
 	if password != passwordConfirm {
-		h.renderer.Render(w, "reset_password.html", map[string]any{
+		h.renderer.Render(w, r, "reset_password.html", map[string]any{
 			"Token": token,
 			"Error": "Пароли не совпадают",
 		})
 		return
 	}
-	if len(password) < 6 {
-		h.renderer.Render(w, "reset_password.html", map[string]any{
+	if !passwordLenValid(password) {
+		h.renderer.Render(w, r, "reset_password.html", map[string]any{
 			"Token": token,
-			"Error": "Пароль минимум 6 символов",
+			"Error": passwordLenError,
 		})
 		return
 	}
@@ -448,12 +546,14 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	user, err := h.users.ResetPassword(r.Context(), token, password)
 	if err != nil {
 		log.Printf("Password reset failed: %v", err)
-		h.renderer.Render(w, "reset_password.html", map[string]any{
+		h.renderer.Render(w, r, "reset_password.html", map[string]any{
 			"Error": "Недействительная или просроченная ссылка. Запросите восстановление заново.",
 		})
 		return
 	}
 
+	// Токен использован — гасим cookie, чтобы не висел до своего MaxAge.
+	h.clearResetCookie(w)
 	// Логиним юзера и ведём в дашборд (или на verify-pending, если email не подтверждён).
 	h.auth.SetSession(w, user.ID)
 	if !user.EmailVerified {

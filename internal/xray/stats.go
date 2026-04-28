@@ -2,6 +2,7 @@ package xray
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -104,31 +105,32 @@ func (s *StatsCollector) notifyBlock(userID int, reason string) {
 	if s.mailer == nil {
 		return
 	}
-	go func() {
+	s.mailer.Submit(fmt.Sprintf("notify block user=%d reason=%s", userID, reason), func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		first, err := s.users.TryMarkBlockNotified(ctx, userID)
-		if err != nil {
-			log.Printf("Notify block: mark user %d: %v", userID, err)
-			return
-		}
-		if !first {
-			return
-		}
-
+		// Сначала читаем настройку юзера: если notify_block выключен — не
+		// расходуем попытку (не ставим флаг). Юзер может включить галку —
+		// и при следующем тике коллектора письмо отправится. TryMark идёт
+		// после проверки и атомарно защищает от гонок.
 		u, err := s.users.GetByID(ctx, userID)
 		if err != nil {
 			log.Printf("Notify block: get user %d: %v", userID, err)
-			return
+			return nil
 		}
 		if !u.NotifyBlock {
-			return
+			return nil
 		}
-		if err := s.mailer.SendBlockNotification(u.Email, u.Username, reason, s.baseURL); err != nil {
-			log.Printf("Notify block email user=%d: %v", userID, err)
+		first, err := s.users.TryMarkBlockNotified(ctx, userID)
+		if err != nil {
+			log.Printf("Notify block: mark user %d: %v", userID, err)
+			return nil
 		}
-	}()
+		if !first {
+			return nil
+		}
+		return s.mailer.SendBlockNotification(u.Email, u.Username, reason, s.baseURL)
+	})
 }
 
 // trafficLowThreshold — порог «скоро закончится», при котором шлём
@@ -143,31 +145,30 @@ func (s *StatsCollector) notifyProfileLimit(profileID, userID int, profileName s
 	if s.mailer == nil {
 		return
 	}
-	go func() {
+	s.mailer.Submit(fmt.Sprintf("notify profile-limit user=%d profile=%d", userID, profileID), func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		first, err := s.profiles.TryMarkLimitNotified(ctx, profileID)
-		if err != nil {
-			log.Printf("Notify profile limit: mark profile %d: %v", profileID, err)
-			return
-		}
-		if !first {
-			return
-		}
-
+		// См. комментарий в notifyBlock: настройку проверяем до TryMark,
+		// иначе включение галки post-factum никогда не разморозит уведомление.
 		u, err := s.users.GetByID(ctx, userID)
 		if err != nil {
 			log.Printf("Notify profile limit: get user %d: %v", userID, err)
-			return
+			return nil
 		}
 		if !u.NotifyProfileLimit {
-			return
+			return nil
 		}
-		if err := s.mailer.SendProfileLimitNotification(u.Email, u.Username, profileName, limitBytes, s.baseURL); err != nil {
-			log.Printf("Notify profile limit email user=%d profile=%d: %v", userID, profileID, err)
+		first, err := s.profiles.TryMarkLimitNotified(ctx, profileID)
+		if err != nil {
+			log.Printf("Notify profile limit: mark profile %d: %v", profileID, err)
+			return nil
 		}
-	}()
+		if !first {
+			return nil
+		}
+		return s.mailer.SendProfileLimitNotification(u.Email, u.Username, profileName, limitBytes, s.baseURL)
+	})
 }
 
 // notifyTrafficLow асинхронно шлёт юзеру письмо «скоро закончится трафик».
@@ -177,31 +178,29 @@ func (s *StatsCollector) notifyTrafficLow(userID int, remaining int64) {
 	if s.mailer == nil {
 		return
 	}
-	go func() {
+	s.mailer.Submit(fmt.Sprintf("notify traffic-low user=%d", userID), func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		first, err := s.users.TryMarkTrafficLowNotified(ctx, userID)
-		if err != nil {
-			log.Printf("Notify low: mark user %d: %v", userID, err)
-			return
-		}
-		if !first {
-			return
-		}
-
+		// См. notifyBlock: настройку проверяем до TryMark.
 		u, err := s.users.GetByID(ctx, userID)
 		if err != nil {
 			log.Printf("Notify low: get user %d: %v", userID, err)
-			return
+			return nil
 		}
 		if !u.NotifyTrafficLow {
-			return
+			return nil
 		}
-		if err := s.mailer.SendTrafficLowNotification(u.Email, u.Username, remaining, s.baseURL); err != nil {
-			log.Printf("Notify low email user=%d: %v", userID, err)
+		first, err := s.users.TryMarkTrafficLowNotified(ctx, userID)
+		if err != nil {
+			log.Printf("Notify low: mark user %d: %v", userID, err)
+			return nil
 		}
-	}()
+		if !first {
+			return nil
+		}
+		return s.mailer.SendTrafficLowNotification(u.Email, u.Username, remaining, s.baseURL)
+	})
 }
 
 // Snapshot возвращает потокобезопасный снимок для HTTP-хендлеров.

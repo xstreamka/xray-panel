@@ -135,90 +135,105 @@ func main() {
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Compress(5))
+	r.Use(middleware.SecurityHeaders(cfg.BaseURL, cfg.PayServiceURL))
+	// Глобальный лимит на тело запроса: 64 KiB. Все формы панели в это
+	// помещаются с запасом. Webhook идёт отдельно (вне группы), при необходимости
+	// получит свой лимит. /feedback ставит более жёсткий локальный MaxBytesReader.
+	r.Use(middleware.MaxBodyBytes(64 * 1024))
 
 	fs := http.FileServer(http.Dir("static"))
 	r.Handle("/static/*", http.StripPrefix("/static/", fs))
 
-	// Публичные роуты
-	r.Get("/login", authHandler.LoginPage)
-	r.With(loginLimiter.Middleware).Post("/login", authHandler.Login)
-	r.Get("/register", authHandler.RegisterPage)
-	r.With(loginLimiter.Middleware).Post("/register", authHandler.Register)
-	r.Get("/verify", authHandler.VerifyEmail) // GET /verify?token=xxx
-	r.Get("/logout", authHandler.Logout)
-	// Восстановление пароля. Rate-limit (3/час) выполняется внутри хендлера,
-	// чтобы рендерить дружелюбную страницу вместо голого 429.
-	r.Get("/forgot", authHandler.ForgotPasswordPage)
-	r.Post("/forgot", authHandler.ForgotPassword)
-	r.Get("/reset", authHandler.ResetPasswordPage) // GET /reset?token=xxx
-	r.Post("/reset", authHandler.ResetPassword)
-	// Webhook от pay-service (защищён HMAC-подписью, не сессией)
+	// Webhook от pay-service регистрируем ДО CSRF-группы:
+	// он не использует сессию и не должен ломаться на проверке CSRF —
+	// собственная защита HMAC-подписью встроена в обработчик.
 	r.Post("/api/payments/webhook", payHandler.Webhook)
 
-	// Роуты для залогиненных, но НЕ обязательно верифицированных
+	// CSRF-защита всех остальных роутов (формы под сессией).
+	csrfMW := middleware.NewCSRFMiddleware(cfg.BaseURL)
 	r.Group(func(r chi.Router) {
-		r.Use(authMW.RequireAuth)
-		r.Get("/verify-pending", authHandler.VerifyPendingPage)
-		r.With(loginLimiter.Middleware).Post("/resend-verification", authHandler.ResendVerification)
-	})
+		r.Use(csrfMW.Middleware)
 
-	// Роуты для залогиненных И верифицированных
-	r.Group(func(r chi.Router) {
-		r.Use(authMW.RequireAuth)
-		r.Use(authMW.RequireVerified)
+		// Публичные роуты
+		r.Get("/login", authHandler.LoginPage)
+		r.With(loginLimiter.Middleware).Post("/login", authHandler.Login)
+		r.Get("/register", authHandler.RegisterPage)
+		r.With(loginLimiter.Middleware).Post("/register", authHandler.Register)
+		r.Get("/verify", authHandler.VerifyEmail) // GET /verify?token=xxx
+		r.Get("/logout", authHandler.Logout)
+		// Восстановление пароля. Rate-limit (3/час) выполняется внутри хендлера,
+		// чтобы рендерить дружелюбную страницу вместо голого 429.
+		r.Get("/forgot", authHandler.ForgotPasswordPage)
+		r.Post("/forgot", authHandler.ForgotPassword)
+		r.Get("/reset", authHandler.ResetPasswordPage)
+		r.Post("/reset", authHandler.ResetPassword)
 
-		r.Get("/", dashHandler.Welcome)
-		r.Get("/dashboard", dashHandler.Index)
-		r.Get("/dashboard/stats", dashHandler.StatsJSON)
-		r.Get("/dashboard/traffic", dashHandler.TrafficChart)
-		r.Get("/dashboard/profiles/{id}/traffic", dashHandler.ProfileTrafficChart)
-		r.Post("/dashboard/profiles", dashHandler.CreateProfile)
-		r.Post("/dashboard/profiles/{id}/limit", dashHandler.SetProfileLimit)
-		r.Post("/dashboard/profiles/{id}/toggle", dashHandler.ToggleProfile)
-		r.Post("/dashboard/profiles/{id}/reset", dashHandler.ResetProfileTraffic)
-		r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
-
-		// Оплата (редирект на pay-service)
-		r.Get("/pay", payHandler.Index)
-		r.Post("/pay/checkout", payHandler.Checkout)
-		r.Get("/pay/history", payHandler.History)
-
-		// Настройки уведомлений
-		r.Get("/settings", settingsHandler.Index)
-		r.Post("/settings", settingsHandler.Save)
-
-		// Обратная связь
-		r.Get("/feedback", feedbackHandler.Index)
-		r.Post("/feedback", feedbackHandler.Send)
-
-		// Админка
+		// Роуты для залогиненных, но НЕ обязательно верифицированных
 		r.Group(func(r chi.Router) {
-			r.Use(authMW.RequireAdmin)
-			r.Get("/admin", adminHandler.Users)
-			r.Get("/admin/stats", adminHandler.StatsJSON)
-			r.Get("/admin/users/{id}", adminHandler.UserView)
-			r.Get("/admin/users/{id}/traffic", adminHandler.UserTrafficChart)
-			r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
-			r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
-			r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
-			r.Post("/admin/users/{id}/extra", adminHandler.SetExtraBalance)
-			r.Post("/admin/users/{id}/toggle", adminHandler.ToggleUserActive)
-			r.Post("/admin/users/{id}/subscription", adminHandler.SetSubscription)
-			r.Post("/admin/users/{id}/subscription/cancel", adminHandler.CancelSubscription)
+			r.Use(authMW.RequireAuth)
+			r.Get("/verify-pending", authHandler.VerifyPendingPage)
+			r.With(loginLimiter.Middleware).Post("/resend-verification", authHandler.ResendVerification)
+		})
 
-			// Тарифы
-			r.Get("/admin/tariffs", adminHandler.TariffsList)
-			r.Post("/admin/tariffs", adminHandler.TariffCreate)
-			r.Post("/admin/tariffs/{id}", adminHandler.TariffUpdate)
-			r.Post("/admin/tariffs/{id}/delete", adminHandler.TariffDelete)
+		// Роуты для залогиненных И верифицированных
+		r.Group(func(r chi.Router) {
+			r.Use(authMW.RequireAuth)
+			r.Use(authMW.RequireVerified)
 
-			// Инвайты + режим регистрации
-			r.Get("/admin/invites", adminHandler.InvitesList)
-			r.Post("/admin/invites", adminHandler.InviteCreate)
-			r.Post("/admin/invites/{id}/toggle", adminHandler.InviteToggle)
-			r.Post("/admin/invites/{id}/delete", adminHandler.InviteDelete)
-			r.Get("/admin/invites/{id}/users", adminHandler.InviteUsers)
-			r.Post("/admin/settings/registration-mode", adminHandler.SetRegistrationMode)
+			r.Get("/", dashHandler.Welcome)
+			r.Get("/dashboard", dashHandler.Index)
+			r.Get("/dashboard/stats", dashHandler.StatsJSON)
+			r.Get("/dashboard/traffic", dashHandler.TrafficChart)
+			r.Get("/dashboard/profiles/{id}/traffic", dashHandler.ProfileTrafficChart)
+			r.Post("/dashboard/profiles", dashHandler.CreateProfile)
+			r.Post("/dashboard/profiles/{id}/limit", dashHandler.SetProfileLimit)
+			r.Post("/dashboard/profiles/{id}/toggle", dashHandler.ToggleProfile)
+			r.Post("/dashboard/profiles/{id}/reset", dashHandler.ResetProfileTraffic)
+			r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
+
+			// Оплата (редирект на pay-service)
+			r.Get("/pay", payHandler.Index)
+			r.Post("/pay/checkout", payHandler.Checkout)
+			r.Get("/pay/history", payHandler.History)
+
+			// Настройки уведомлений
+			r.Get("/settings", settingsHandler.Index)
+			r.Post("/settings", settingsHandler.Save)
+
+			// Обратная связь
+			r.Get("/feedback", feedbackHandler.Index)
+			r.Post("/feedback", feedbackHandler.Send)
+
+			// Админка
+			r.Group(func(r chi.Router) {
+				r.Use(authMW.RequireAdmin)
+				r.Get("/admin", adminHandler.Users)
+				r.Get("/admin/stats", adminHandler.StatsJSON)
+				r.Get("/admin/users/{id}", adminHandler.UserView)
+				r.Get("/admin/users/{id}/traffic", adminHandler.UserTrafficChart)
+				r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
+				r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
+				r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
+				r.Post("/admin/users/{id}/extra", adminHandler.SetExtraBalance)
+				r.Post("/admin/users/{id}/toggle", adminHandler.ToggleUserActive)
+				r.Post("/admin/users/{id}/subscription", adminHandler.SetSubscription)
+				r.Post("/admin/users/{id}/subscription/cancel", adminHandler.CancelSubscription)
+
+				// Тарифы
+				r.Get("/admin/tariffs", adminHandler.TariffsList)
+				r.Post("/admin/tariffs", adminHandler.TariffCreate)
+				r.Post("/admin/tariffs/{id}", adminHandler.TariffUpdate)
+				r.Post("/admin/tariffs/{id}/delete", adminHandler.TariffDelete)
+
+				// Инвайты + режим регистрации
+				r.Get("/admin/invites", adminHandler.InvitesList)
+				r.Post("/admin/invites", adminHandler.InviteCreate)
+				r.Post("/admin/invites/{id}/toggle", adminHandler.InviteToggle)
+				r.Post("/admin/invites/{id}/note", adminHandler.InviteUpdateNote)
+				r.Post("/admin/invites/{id}/delete", adminHandler.InviteDelete)
+				r.Get("/admin/invites/{id}/users", adminHandler.InviteUsers)
+				r.Post("/admin/settings/registration-mode", adminHandler.SetRegistrationMode)
+			})
 		})
 	})
 
@@ -236,6 +251,11 @@ func main() {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		srv.Shutdown(shutdownCtx)
+		// Дождёмся фоновых отправок писем (verification, reset, payment notify, и т.п.).
+		// Без этого SIGTERM мог дропнуть письмо, ушедшее в горутину секунду назад.
+		if mailer != nil {
+			mailer.Shutdown(10 * time.Second)
+		}
 	}()
 
 	log.Printf("Starting server on %s", cfg.ListenAddr)

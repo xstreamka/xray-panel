@@ -1,6 +1,6 @@
 {{template "base" .}}
 
-{{define "title"}}Обратная связь — VPN Panel{{end}}
+{{define "title"}}Обратная связь — XS VPN{{end}}
 
 {{define "content"}}
 <h1 style="margin: 1.5rem 0;">Обратная связь</h1>
@@ -22,6 +22,7 @@
     {{end}}
 
     <form method="POST" action="/feedback">
+                {{template "csrf" $}}
         <div style="display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 1rem;">
             <label style="display: flex; flex-direction: column; gap: 0.3rem; color: #e2e8f0; font-size: 0.9rem;">
                 <span>Тема</span>

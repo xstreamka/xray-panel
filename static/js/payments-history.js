@@ -18,3 +18,9 @@ function setFilter(btn) {
         row.style.display = (kind === 'all' || k === kind) ? '' : 'none';
     });
 }
+
+// CSP: inline onclick недопустим — навешиваем делегированно по data-filter.
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-filter]');
+    if (btn) setFilter(btn);
+});

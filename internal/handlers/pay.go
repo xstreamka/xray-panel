@@ -99,7 +99,7 @@ func (h *PayHandler) Index(w http.ResponseWriter, r *http.Request) {
 		baseRemaining = 0
 	}
 
-	h.renderer.Render(w, "pay.html", map[string]any{
+	h.renderer.Render(w, r, "pay.html", map[string]any{
 		"Active":        "pay",
 		"User":          user,
 		"SubPlans":      subPlans,
@@ -332,7 +332,11 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.mailer != nil {
-		go h.sendPaymentEmail(userID, p.InvID, tariff, trafficGB, amountRub)
+		uid, inv, t, gb, rub := userID, p.InvID, tariff, trafficGB, amountRub
+		h.mailer.Submit(fmt.Sprintf("payment notify user=%d inv_id=%d", uid, inv), func() error {
+			h.sendPaymentEmail(uid, inv, t, gb, rub)
+			return nil
+		})
 	}
 
 	writeOK(w)
@@ -405,7 +409,7 @@ func (h *PayHandler) History(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.renderer.Render(w, "payments_history.html", map[string]any{
+	h.renderer.Render(w, r, "payments_history.html", map[string]any{
 		"Active":     "pay",
 		"User":       user,
 		"Receipts":   receipts,

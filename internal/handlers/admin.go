@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -295,7 +296,7 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 		views = append(views, h.buildUserView(r.Context(), u, profilesByUser[u.ID], tariffNames))
 	}
 
-	h.renderer.Render(w, "admin.html", map[string]any{
+	h.renderer.Render(w, r, "admin.html", map[string]any{
 		"Active": "admin",
 		"User":   middleware.UserFromContext(r.Context()),
 		"Users":  views,
@@ -346,7 +347,7 @@ func (h *AdminHandler) UserView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.renderer.Render(w, "user.html", map[string]any{
+	h.renderer.Render(w, r, "user.html", map[string]any{
 		"Active":   "admin",
 		"User":     middleware.UserFromContext(r.Context()),
 		"View":     view,
@@ -790,7 +791,7 @@ func (h *AdminHandler) TariffsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
-	h.renderer.Render(w, "tariffs.html", map[string]any{
+	h.renderer.Render(w, r, "tariffs.html", map[string]any{
 		"Active":  "admin-tariffs",
 		"User":    middleware.UserFromContext(r.Context()),
 		"Tariffs": tariffs,
@@ -844,6 +845,13 @@ func parseTariffForm(r *http.Request) *models.Tariff {
 	gb, _ := strconv.ParseFloat(r.FormValue("traffic_gb"), 64)
 	sortOrder, _ := strconv.Atoi(r.FormValue("sort_order"))
 	durationDays, _ := strconv.Atoi(r.FormValue("duration_days"))
+	discountPercent, _ := strconv.Atoi(r.FormValue("discount_percent"))
+	if discountPercent < 0 {
+		discountPercent = 0
+	}
+	if discountPercent > 100 {
+		discountPercent = 100
+	}
 
 	kind := models.TariffKind(strings.TrimSpace(r.FormValue("kind")))
 	if kind == "" {
@@ -856,22 +864,33 @@ func parseTariffForm(r *http.Request) *models.Tariff {
 	}
 
 	return &models.Tariff{
-		Code:         strings.TrimSpace(r.FormValue("code")),
-		Label:        strings.TrimSpace(r.FormValue("label")),
-		Description:  strings.TrimSpace(r.FormValue("description")),
-		AmountRub:    amount,
-		TrafficGB:    gb,
-		Kind:         kind,
-		DurationDays: durationDays,
-		IsPopular:    r.FormValue("is_popular") == "on",
-		IsActive:     r.FormValue("is_active") == "on",
-		SortOrder:    sortOrder,
+		Code:            strings.TrimSpace(r.FormValue("code")),
+		Label:           strings.TrimSpace(r.FormValue("label")),
+		Description:     strings.TrimSpace(r.FormValue("description")),
+		AmountRub:       amount,
+		TrafficGB:       gb,
+		Kind:            kind,
+		DurationDays:    durationDays,
+		IsPopular:       r.FormValue("is_popular") == "on",
+		DiscountPercent: discountPercent,
+		IsActive:        r.FormValue("is_active") == "on",
+		SortOrder:       sortOrder,
 	}
 }
+
+// tariffCodeRe — code уезжает в URL pay-service как plan_id, поэтому жёстко
+// ограничиваем: ASCII lower/digits/underscore, без пробелов и unicode.
+var tariffCodeRe = regexp.MustCompile(`^[a-z0-9_]+$`)
 
 func validateTariff(t *models.Tariff) error {
 	if t.Code == "" || t.Label == "" || t.Description == "" {
 		return fmt.Errorf("заполните код, название и описание")
+	}
+	if len(t.Code) > 50 || !tariffCodeRe.MatchString(t.Code) {
+		return fmt.Errorf("код: до 50 символов, только латиница в нижнем регистре, цифры и _")
+	}
+	if utf8.RuneCountInString(t.Label) > 100 {
+		return fmt.Errorf("название не длиннее 100 символов")
 	}
 	if t.AmountRub <= 0 {
 		return fmt.Errorf("цена должна быть больше нуля")
@@ -927,7 +946,7 @@ func (h *AdminHandler) InvitesList(w http.ResponseWriter, r *http.Request) {
 	}
 	mode, _ := h.invites.GetRegistrationMode(r.Context())
 
-	h.renderer.Render(w, "invites.html", map[string]any{
+	h.renderer.Render(w, r, "invites.html", map[string]any{
 		"Active":         "admin-invites",
 		"User":           middleware.UserFromContext(r.Context()),
 		"Invites":        invites,
@@ -983,6 +1002,23 @@ func (h *AdminHandler) InviteToggle(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
 }
 
+// InviteUpdateNote — POST /admin/invites/{id}/note — поменять заметку.
+// Длина заметки ограничена 255 рунами (как в БД), пустая строка допустима.
+func (h *AdminHandler) InviteUpdateNote(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	note := strings.TrimSpace(r.FormValue("note"))
+	if utf8.RuneCountInString(note) > 255 {
+		http.Error(w, "Заметка слишком длинная (максимум 255 символов)", http.StatusBadRequest)
+		return
+	}
+	if err := h.invites.UpdateNote(r.Context(), id, note); err != nil {
+		log.Printf("Admin: invite update note error: %v", err)
+		http.Error(w, "Ошибка обновления заметки", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/invites", http.StatusSeeOther)
+}
+
 // InviteDelete — POST /admin/invites/{id}/delete — soft-delete.
 // Физически строку не удаляем, чтобы страница «кто заинвайтился» не ломалась.
 func (h *AdminHandler) InviteDelete(w http.ResponseWriter, r *http.Request) {
@@ -1010,7 +1046,7 @@ func (h *AdminHandler) InviteUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
-	h.renderer.Render(w, "invite_users.html", map[string]any{
+	h.renderer.Render(w, r, "invite_users.html", map[string]any{
 		"Active": "admin-invites",
 		"User":   middleware.UserFromContext(r.Context()),
 		"Invite": inv,

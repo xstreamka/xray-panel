@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -125,12 +126,18 @@ func generateToken() (string, error) {
 //  Регистрация / аутентификация / верификация
 // ──────────────────────────────────────────────
 
+// bcryptCost — текущая целевая стоимость хеша. DefaultCost (10) был адекватен
+// в 2014; современный baseline по OWASP — 12 (≈250–400 ms на хеш). Старые хеши
+// продолжают работать через CompareHashAndPassword, апгрейд — лениво в
+// Authenticate (rehashIfWeak).
+const bcryptCost = 12
+
 // Create создаёт нового юзера. inviteID — опциональная привязка к инвайту, по
 // которому юзер пришёл (для режимов invite_only/both). Колонка invite_id
 // объявлена ON DELETE SET NULL, так что «удаление» (физическое) инвайта — хоть
 // и не используется — связь бы не сломало.
 func (s *UserStore) Create(ctx context.Context, username, email, password string, inviteID *int) (*User, string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
 		return nil, "", fmt.Errorf("hash password: %w", err)
 	}
@@ -179,10 +186,34 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		return nil, fmt.Errorf("invalid password")
 	}
+	// Lazy upgrade: если хеш сделан старым cost'ом — пересчитываем под текущий
+	// и обновляем в БД. Failure здесь не критичен, юзер всё равно вошёл.
+	s.rehashIfWeak(ctx, u.ID, u.PasswordHash, password)
 	if !u.IsActive {
 		return nil, ErrUserDeactivated
 	}
 	return u, nil
+}
+
+// rehashIfWeak смотрит cost старого хеша и, если он ниже bcryptCost,
+// перехеширует пароль и обновляет users.password_hash. Ошибки логируются,
+// но не возвращаются — тихий апгрейд не должен ломать логин.
+func (s *UserStore) rehashIfWeak(ctx context.Context, userID int, oldHash, plainPassword string) {
+	cost, err := bcrypt.Cost([]byte(oldHash))
+	if err != nil || cost >= bcryptCost {
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(plainPassword), bcryptCost)
+	if err != nil {
+		log.Printf("rehashIfWeak user=%d: hash failed: %v", userID, err)
+		return
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
+		string(newHash), userID,
+	); err != nil {
+		log.Printf("rehashIfWeak user=%d: update failed: %v", userID, err)
+	}
 }
 
 // SetActive меняет is_active у юзера. Используется админкой для
@@ -264,7 +295,7 @@ func (s *UserStore) CreateResetToken(ctx context.Context, loginOrEmail string) (
 // чтобы повторное использование было невозможно. Возвращает юзера для логина
 // сразу после сброса.
 func (s *UserStore) ResetPassword(ctx context.Context, token, newPassword string) (*User, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}

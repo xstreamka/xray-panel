@@ -1,6 +1,6 @@
 {{template "base" .}}
 
-{{define "title"}}{{.View.Username}} — VPN Panel{{end}}
+{{define "title"}}{{.View.Username}} — XS VPN{{end}}
 
 {{define "content"}}
 {{with .View}}
@@ -13,7 +13,7 @@
         </div>
         <div style="display: flex; align-items: center; gap: 0.5rem;">
             <span style="color: #94a3b8; font-size: 0.85rem;">Обновление:</span>
-            <select id="refresh-interval" onchange="setRefresh(this.value)"
+            <select id="refresh-interval" data-refresh-select
                 style="padding: 0.3rem 0.5rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem; width: auto; margin: 0;">
                 <option value="0">выкл</option>
                 <option value="5">5 сек</option>
@@ -39,13 +39,15 @@
         <div style="display: flex; gap: 0.5rem;">
             {{if .IsActive}}
             <form method="POST" action="/admin/users/{{.ID}}/toggle"
-                  onsubmit="return confirm('Выключить пользователя {{.Username}}? Его выкинет из сессии, а VPN-профили отключатся.');">
+                  data-confirm="Выключить пользователя {{.Username}}? Его выкинет из сессии, а VPN-профили отключатся.">
+                {{template "csrf" $}}
                 <input type="hidden" name="action" value="deactivate">
                 <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                 <button type="submit" class="btn btn-danger">Выключить учётку</button>
             </form>
             {{else}}
             <form method="POST" action="/admin/users/{{.ID}}/toggle">
+                {{template "csrf" $}}
                 <input type="hidden" name="action" value="activate">
                 <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                 <button type="submit" class="btn btn-primary">Включить учётку</button>
@@ -130,6 +132,7 @@
     </div>
 
     <form method="POST" action="/admin/users/{{.ID}}/subscription" style="margin-bottom: 1rem;">
+                {{template "csrf" $}}
         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
         <div style="display: grid; grid-template-columns: 2fr 1fr auto; gap: 0.8rem; align-items: end;">
             <div>
@@ -151,7 +154,8 @@
 
     {{if .TariffLabel}}
     <form method="POST" action="/admin/users/{{.ID}}/subscription/cancel"
-          onsubmit="return confirm('Отменить подписку? base обнулится, extra/frozen останется.');">
+          data-confirm="Отменить подписку? base обнулится, extra/frozen останется.">
+                {{template "csrf" $}}
         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
         <button type="submit" class="btn" style="background: #475569; color: white;">Отменить подписку</button>
     </form>
@@ -209,6 +213,7 @@
 
     <form method="POST" action="/admin/users/{{.ID}}/extra"
           title="Установить extra-баланс (ГБ) — и плюс, и минус">
+                {{template "csrf" $}}
         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
         <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.8rem; align-items: end; max-width: 400px;">
             <div>
@@ -268,6 +273,7 @@
             </td>
             <td>
                 <form method="POST" action="/admin/profiles/{{.ID}}/limit" style="display: flex; gap: 0.3rem; align-items: center;">
+                {{template "csrf" $}}
                     <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                     <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
                         style="width: 80px; padding: 0.3rem 0.5rem; margin: 0;">
@@ -279,17 +285,20 @@
                 <div style="display: inline-flex; gap: 0.3rem;">
                     <form method="POST" action="/admin/profiles/{{.ID}}/toggle"
                           data-stat="profile-toggle-deactivate" style="{{if not .IsActive}}display: none;{{end}}">
+                {{template "csrf" $}}
                         <input type="hidden" name="action" value="deactivate">
                         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                         <button type="submit" class="btn btn-sm btn-danger">Откл</button>
                     </form>
                     <form method="POST" action="/admin/profiles/{{.ID}}/toggle"
                           data-stat="profile-toggle-activate" style="{{if .IsActive}}display: none;{{end}}">
+                {{template "csrf" $}}
                         <input type="hidden" name="action" value="activate">
                         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                         <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
                     </form>
-                    <form method="POST" action="/admin/profiles/{{.ID}}/reset" onsubmit="return confirm('Сбросить трафик?')">
+                    <form method="POST" action="/admin/profiles/{{.ID}}/reset" data-confirm="Сбросить трафик?">
+                {{template "csrf" $}}
                         <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
                         <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Сброс</button>
                     </form>
@@ -324,7 +333,7 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/js/lib/chart.umd.min.js?v={{assetVersion}}"></script>
 <script src="/static/js/traffic-chart.js?v={{assetVersion}}" defer></script>
 
 </div>

@@ -44,7 +44,7 @@ func (h *FeedbackHandler) Index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("sent") == "1" {
 		success = "Спасибо! Сообщение отправлено, мы ответим на ваш email."
 	}
-	h.renderer.Render(w, "feedback.html", map[string]any{
+	h.renderer.Render(w, r, "feedback.html", map[string]any{
 		"Active":  "feedback",
 		"User":    user,
 		"Success": success,
@@ -112,7 +112,7 @@ func (h *FeedbackHandler) Send(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FeedbackHandler) render(w http.ResponseWriter, r *http.Request, user any, subject, message, errMsg, successMsg string) {
-	h.renderer.Render(w, "feedback.html", map[string]any{
+	h.renderer.Render(w, r, "feedback.html", map[string]any{
 		"Active":  "feedback",
 		"User":    user,
 		"Subject": subject,
