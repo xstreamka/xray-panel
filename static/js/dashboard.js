@@ -47,10 +47,13 @@ function lockProfileCard(card, message) {
     if (card.dataset.locked === '1') return;
     card.dataset.locked = '1';
     card.style.position = card.style.position || 'relative';
-    // ВАЖНО: hidden-инпуты не трогаем — иначе CSRF-токен ($csrf) выпадет из
-    // FormData, которую браузер собирает уже ПОСЛЕ submit-события, и сервер
-    // ответит 403 «CSRF token mismatch».
-    card.querySelectorAll('button, input:not([type="hidden"]), select, a').forEach(el => {
+    // ВАЖНО: <input> мы НЕ трогаем — браузер сериализует FormData уже после
+    // submit-события, и любой disabled-инпут (включая hidden CSRF и обычные
+    // number/text) выпадает из тела запроса. Это ломало и CSRF (403 mismatch),
+    // и значение limit_gb=0 (на бэке прилетал пустой string → ParseFloat fail).
+    // Оверлей сверху всё равно блокирует все клики, поэтому визуальный дизейбл
+    // инпутов нам не нужен.
+    card.querySelectorAll('button, select, a').forEach(el => {
         if (el.tagName === 'A') {
             el.style.pointerEvents = 'none';
             el.style.opacity = '0.5';
