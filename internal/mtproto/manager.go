@@ -162,7 +162,7 @@ func (m *Manager) UnregisterProfile(ctx context.Context, profileID int) {
 	delete(m.trafficBuffer, profileID)
 	m.mu.Unlock()
 
-	if err := m.Sync(ctx); err != nil {
+	if err := m.SyncForceDisconnect(ctx); err != nil {
 		log.Printf("MTProto: sync after unregister profile=%d: %v", profileID, err)
 	}
 }
@@ -236,7 +236,7 @@ func (m *Manager) disconnectUserAll(ctx context.Context, userID int, reason stri
 	m.mu.Unlock()
 
 	if len(ids) > 0 {
-		if err := m.Sync(ctx); err != nil {
+		if err := m.SyncForceDisconnect(ctx); err != nil {
 			log.Printf("MTProto enforce: sync user=%d: %v", userID, err)
 		}
 	}
@@ -247,6 +247,17 @@ func (m *Manager) disconnectUserAll(ctx context.Context, userID int, reason stri
 }
 
 func (m *Manager) Sync(ctx context.Context) error {
+	return m.syncWith(ctx, m.Reload, "config synced")
+}
+
+// SyncForceDisconnect перезапускает контейнер целиком — единственный способ
+// разорвать живые TCP-сессии забаненных пользователей (см. комментарий к Restart).
+// Вызывать только в путях принудительного отключения: лимит/баланс/срок.
+func (m *Manager) SyncForceDisconnect(ctx context.Context) error {
+	return m.syncWith(ctx, m.Restart, "config synced (force restart)")
+}
+
+func (m *Manager) syncWith(ctx context.Context, applyFn func(context.Context) error, tag string) error {
 	if !m.Enabled() {
 		return nil
 	}
@@ -257,14 +268,27 @@ func (m *Manager) Sync(ctx context.Context) error {
 	if err := WriteConfig(m.cfg, active, m.cfg.MTProtoConfigPath); err != nil {
 		return err
 	}
-	if err := m.Reload(ctx); err != nil {
+	if err := applyFn(ctx); err != nil {
 		return err
 	}
-	log.Printf("MTProto: config synced with %d active profiles", len(active))
+	log.Printf("MTProto: %s with %d active profiles", tag, len(active))
 	return nil
 }
 
 func (m *Manager) Reload(ctx context.Context) error {
+	return m.dockerCall(ctx, "/kill?signal=USR2", "SIGUSR2")
+}
+
+// Restart полностью рестартит контейнер mtprotoproxy. Это рвёт ВСЕ TCP-сессии
+// (включая живых юзеров — они автоматически переподключатся за 1-2 сек), но это
+// единственный способ выкинуть только что забаненного юзера: SIGUSR2 в upstream
+// (alexbers/mtprotoproxy) перечитывает USERS, но уже открытые соединения не закрывает,
+// потому что аутентификация в MTProto-протоколе одноразовая на handshake.
+func (m *Manager) Restart(ctx context.Context) error {
+	return m.dockerCall(ctx, "/restart", "restart")
+}
+
+func (m *Manager) dockerCall(ctx context.Context, suffix, op string) error {
 	if m.cfg.MTProtoDockerSocket == "" || m.cfg.MTProtoContainer == "" {
 		return nil
 	}
@@ -273,22 +297,26 @@ func (m *Manager) Reload(ctx context.Context) error {
 			return (&net.Dialer{}).DialContext(ctx, "unix", m.cfg.MTProtoDockerSocket)
 		},
 	}
-	client := &http.Client{Transport: tr, Timeout: 5 * time.Second}
-	url := "http://docker/containers/" + m.cfg.MTProtoContainer + "/kill?signal=USR2"
+	timeout := 5 * time.Second
+	if op == "restart" {
+		timeout = 30 * time.Second
+	}
+	client := &http.Client{Transport: tr, Timeout: timeout}
+	url := "http://docker/containers/" + m.cfg.MTProtoContainer + suffix
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("docker SIGUSR2 %s: %w", m.cfg.MTProtoContainer, err)
+		return fmt.Errorf("docker %s %s: %w", op, m.cfg.MTProtoContainer, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
 		return nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-	return fmt.Errorf("docker SIGUSR2 %s: status=%d body=%s", m.cfg.MTProtoContainer, resp.StatusCode, strings.TrimSpace(string(body)))
+	return fmt.Errorf("docker %s %s: status=%d body=%s", op, m.cfg.MTProtoContainer, resp.StatusCode, strings.TrimSpace(string(body)))
 }
 
 func (m *Manager) Run(ctx context.Context) {
@@ -563,7 +591,7 @@ func (m *Manager) disconnectProfile(ctx context.Context, profileID int, total, l
 		log.Printf("MTProto enforce: failed to deactivate profile=%d: %v", profileID, err)
 		return
 	}
-	if err := m.Sync(ctx); err != nil {
+	if err := m.SyncForceDisconnect(ctx); err != nil {
 		log.Printf("MTProto enforce: sync after profile limit profile=%d: %v", profileID, err)
 	}
 	log.Printf("MTProto enforce: profile=%d disabled — limit %d total %d", profileID, limit, total)
@@ -595,7 +623,7 @@ func (m *Manager) enforceAll(ctx context.Context) {
 		}
 	}
 	if needSync {
-		if err := m.Sync(ctx); err != nil {
+		if err := m.SyncForceDisconnect(ctx); err != nil {
 			log.Printf("MTProto enforceAll: sync: %v", err)
 		}
 	}

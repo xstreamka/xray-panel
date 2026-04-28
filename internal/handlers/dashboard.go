@@ -836,7 +836,7 @@ func (h *DashboardHandler) deactivateMTProtoProfile(ctx context.Context, p *mode
 		log.Printf("Dashboard: mtproto deactivate SetActive profile=%d: %v", p.ID, err)
 		return
 	}
-	if err := h.mtManager.Sync(ctx); err != nil {
+	if err := h.mtManager.SyncForceDisconnect(ctx); err != nil {
 		log.Printf("Dashboard: mtproto deactivate sync profile=%d: %v", p.ID, err)
 	}
 }

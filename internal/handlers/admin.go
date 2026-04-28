@@ -586,7 +586,7 @@ func (h *AdminHandler) ToggleMTProtoProfile(w http.ResponseWriter, r *http.Reque
 			log.Printf("Admin: mtproto deactivate error: %v", err)
 		}
 		if h.mtManager != nil {
-			if err := h.mtManager.Sync(r.Context()); err != nil {
+			if err := h.mtManager.SyncForceDisconnect(r.Context()); err != nil {
 				log.Printf("Admin: mtproto sync after deactivate: %v", err)
 			}
 		}
