@@ -563,7 +563,11 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) ToggleMTProtoProfile(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id <= 0 {
+		http.Error(w, "Некорректный идентификатор прокси", http.StatusBadRequest)
+		return
+	}
 	action := r.FormValue("action")
 	profile, err := h.mtProfiles.GetByID(r.Context(), id)
 	if err != nil {
@@ -599,8 +603,16 @@ func (h *AdminHandler) ToggleMTProtoProfile(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *AdminHandler) SetMTProtoLimit(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	limitGB, _ := strconv.ParseFloat(r.FormValue("limit_gb"), 64)
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id <= 0 {
+		http.Error(w, "Некорректный идентификатор прокси", http.StatusBadRequest)
+		return
+	}
+	limitGB, err := strconv.ParseFloat(strings.TrimSpace(r.FormValue("limit_gb")), 64)
+	if err != nil || limitGB < 0 {
+		http.Error(w, "Некорректное значение лимита", http.StatusBadRequest)
+		return
+	}
 	limitBytes := int64(limitGB * 1024 * 1024 * 1024)
 
 	if err := h.mtProfiles.SetLimit(r.Context(), id, limitBytes); err != nil {
@@ -613,7 +625,11 @@ func (h *AdminHandler) SetMTProtoLimit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) ResetMTProtoTraffic(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id <= 0 {
+		http.Error(w, "Некорректный идентификатор прокси", http.StatusBadRequest)
+		return
+	}
 	profile, err := h.mtProfiles.GetByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "Прокси не найден", http.StatusNotFound)

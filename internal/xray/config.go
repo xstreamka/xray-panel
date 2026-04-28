@@ -40,6 +40,15 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 		return fmt.Errorf("invalid SERVER_PORT %q: %w", cfg.ServerPort, err)
 	}
 
+	// Локальный SOCKS5-инбаунд для mtprotoproxy включаем только если он реально
+	// настроен в env. Иначе лишний открытый порт никому не нужен, и mtproto
+	// при отсутствии MTPROTO_SOCKS5_* всё равно ходит к Telegram напрямую.
+	mtSocksEnabled := cfg.MTProtoEnabled && cfg.MTProtoSocks5Host != "" && cfg.MTProtoSocks5Port > 0
+	mtSocksListen := cfg.MTProtoSocks5Host
+	if mtSocksListen == "" {
+		mtSocksListen = "127.0.0.1"
+	}
+
 	xrayConfig := map[string]any{
 		// Логирование
 		"log": map[string]any{
@@ -105,19 +114,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 				"protocol": "dokodemo-door",
 				"settings": map[string]any{
 					"address": "127.0.0.1",
-				},
-			},
-			// Локальный SOCKS5 для MTProto: контейнер mtprotoproxy ходит сюда,
-			// чтобы достучаться до Telegram DC через Амстердам (когда РФ-провайдер
-			// режет прямой outbound). Только loopback — наружу не светится.
-			{
-				"tag":      "socks-mtproto",
-				"listen":   "127.0.0.1",
-				"port":     1080,
-				"protocol": "socks",
-				"settings": map[string]any{
-					"auth": "noauth",
-					"udp":  false,
 				},
 			},
 			{
@@ -207,12 +203,6 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"inboundTag":  []string{"api-in"},
 					"outboundTag": "api",
 				},
-				// 2.5. MTProto-SOCKS — всё гоним в Амстердам, минуя гео-правила.
-				{
-					"type":        "field",
-					"inboundTag":  []string{"socks-mtproto"},
-					"outboundTag": "proxy",
-				},
 				// 3. РФ домены → direct
 				{
 					"type": "field",
@@ -258,6 +248,44 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 				},
 			},
 		},
+	}
+
+	if mtSocksEnabled {
+		// Локальный SOCKS5 для mtprotoproxy: контейнер ходит сюда, чтобы дотянуться
+		// до Telegram-DC через outbound proxy (Амстердам). Параметры синхронизированы
+		// с MTPROTO_SOCKS5_HOST/PORT — иначе mtprotoproxy будет стучаться в никуда.
+		inbounds := xrayConfig["inbounds"].([]map[string]any)
+		inbounds = append(inbounds, map[string]any{
+			"tag":      "socks-mtproto",
+			"listen":   mtSocksListen,
+			"port":     cfg.MTProtoSocks5Port,
+			"protocol": "socks",
+			"settings": map[string]any{
+				"auth": "noauth",
+				"udp":  false,
+			},
+		})
+		xrayConfig["inbounds"] = inbounds
+
+		// Роут с этого инбаунда строго в proxy — чтобы геоправила не оттянули
+		// Telegram-DC IP в direct (туда РФ блокирует исходящий).
+		routing := xrayConfig["routing"].(map[string]any)
+		rules := routing["rules"].([]map[string]any)
+		mtRule := map[string]any{
+			"type":        "field",
+			"inboundTag":  []string{"socks-mtproto"},
+			"outboundTag": "proxy",
+		}
+		// Вставляем сразу после анти-петли + api, чтобы гео-правила его не перебили.
+		insertAt := 2
+		if insertAt > len(rules) {
+			insertAt = len(rules)
+		}
+		newRules := make([]map[string]any, 0, len(rules)+1)
+		newRules = append(newRules, rules[:insertAt]...)
+		newRules = append(newRules, mtRule)
+		newRules = append(newRules, rules[insertAt:]...)
+		routing["rules"] = newRules
 	}
 
 	data, err := json.MarshalIndent(xrayConfig, "", "  ")

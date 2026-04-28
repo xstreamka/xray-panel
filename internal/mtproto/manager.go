@@ -25,13 +25,14 @@ import (
 type UserDisconnectFunc func(ctx context.Context, userID int, reason string)
 
 type Manager struct {
-	cfg         *config.Config
-	profiles    *models.MTProtoProfileStore
-	users       *models.UserStore
-	trafficLogs *models.MTProtoTrafficLogStore
-	mailer      *email.Sender
-	baseURL     string
-	httpClient  *http.Client
+	cfg          *config.Config
+	profiles     *models.MTProtoProfileStore
+	users        *models.UserStore
+	trafficLogs  *models.MTProtoTrafficLogStore
+	mailer       *email.Sender
+	baseURL      string
+	httpClient   *http.Client
+	dockerClient *http.Client
 
 	mu              sync.RWMutex
 	lastCounters    map[int][2]int64
@@ -59,7 +60,7 @@ func NewManager(
 	mailer *email.Sender,
 	baseURL string,
 ) *Manager {
-	return &Manager{
+	m := &Manager{
 		cfg:           cfg,
 		profiles:      profiles,
 		users:         users,
@@ -78,6 +79,19 @@ func NewManager(
 		disabledUsers: make(map[int]bool),
 		trafficBuffer: make(map[int][2]int64),
 	}
+	if cfg.MTProtoDockerSocket != "" {
+		socket := cfg.MTProtoDockerSocket
+		// Кэшируем один Transport на менеджер: отдельные таймауты для reload (5с)
+		// и restart (30с) задаём через context в dockerCall.
+		m.dockerClient = &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+				},
+			},
+		}
+	}
+	return m
 }
 
 func (m *Manager) Enabled() bool {
@@ -221,21 +235,13 @@ func (m *Manager) DisconnectUserAllLocal(ctx context.Context, userID int, reason
 }
 
 func (m *Manager) disconnectUserAll(ctx context.Context, userID int, reason string, notifyHook bool) {
-	ids, err := m.profiles.DeactivateAllByUser(ctx, userID)
-	if err != nil {
-		log.Printf("MTProto enforce: DeactivateAllByUser %d: %v", userID, err)
-		return
-	}
+	disabled := m.markUserDisabled(ctx, userID, reason)
 
-	m.mu.Lock()
-	m.disabledUsers[userID] = true
-	for _, id := range ids {
-		m.limits[id] = 0
-	}
+	m.mu.RLock()
 	hook := m.disconnectHook
-	m.mu.Unlock()
+	m.mu.RUnlock()
 
-	if len(ids) > 0 {
+	if disabled {
 		if err := m.SyncForceDisconnect(ctx); err != nil {
 			log.Printf("MTProto enforce: sync user=%d: %v", userID, err)
 		}
@@ -243,7 +249,27 @@ func (m *Manager) disconnectUserAll(ctx context.Context, userID int, reason stri
 	if notifyHook && hook != nil {
 		hook(ctx, userID, reason)
 	}
+}
+
+// markUserDisabled — тихая версия для коалесценции в collectAndEnforce: только
+// апдейтит БД и in-memory state, БЕЗ рестарта контейнера и без disconnectHook.
+// Возвращает true, если действительно были выключены живые профили (нужен sync).
+func (m *Manager) markUserDisabled(ctx context.Context, userID int, reason string) bool {
+	ids, err := m.profiles.DeactivateAllByUser(ctx, userID)
+	if err != nil {
+		log.Printf("MTProto enforce: DeactivateAllByUser %d: %v", userID, err)
+		return false
+	}
+
+	m.mu.Lock()
+	m.disabledUsers[userID] = true
+	for _, id := range ids {
+		m.limits[id] = 0
+	}
+	m.mu.Unlock()
+
 	log.Printf("MTProto enforce: user=%d disabled (%s) — %d profiles", userID, reason, len(ids))
+	return len(ids) > 0
 }
 
 func (m *Manager) Sync(ctx context.Context) error {
@@ -289,25 +315,33 @@ func (m *Manager) Restart(ctx context.Context) error {
 }
 
 func (m *Manager) dockerCall(ctx context.Context, suffix, op string) error {
-	if m.cfg.MTProtoDockerSocket == "" || m.cfg.MTProtoContainer == "" {
-		return nil
+	// Без сокета или имени контейнера мы физически не можем дёрнуть mtprotoproxy.
+	// Раньше тут был silent return nil — это маскировало пропущенный config reload
+	// и приводило к тому, что забаненные юзеры продолжали жить. Теперь падаем с
+	// явной ошибкой, чтобы вызывающий код залогировал и мы заметили миск-конфиг.
+	if m.cfg.MTProtoDockerSocket == "" {
+		return fmt.Errorf("docker %s skipped: MTPROTO_DOCKER_SOCKET is empty", op)
 	}
-	tr := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", m.cfg.MTProtoDockerSocket)
-		},
+	if m.cfg.MTProtoContainer == "" {
+		return fmt.Errorf("docker %s skipped: MTPROTO_CONTAINER is empty", op)
 	}
+	if m.dockerClient == nil {
+		return fmt.Errorf("docker %s skipped: docker client not initialized", op)
+	}
+
 	timeout := 5 * time.Second
 	if op == "restart" {
 		timeout = 30 * time.Second
 	}
-	client := &http.Client{Transport: tr, Timeout: timeout}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	url := "http://docker/containers/" + m.cfg.MTProtoContainer + suffix
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
-	resp, err := client.Do(req)
+	resp, err := m.dockerClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("docker %s %s: %w", op, m.cfg.MTProtoContainer, err)
 	}
@@ -326,7 +360,11 @@ func (m *Manager) Run(ctx context.Context) {
 	}
 	log.Println("MTProto manager started")
 	m.InitCumulative(ctx)
-	if err := m.Sync(ctx); err != nil {
+	// Перезапускаем контейнер mtprotoproxy, чтобы его кумулятивные счётчики
+	// сбросились в 0 синхронно с панелью. Иначе при рестарте панели первый
+	// скрейп зафиксирует текущее значение как baseline и весь трафик,
+	// нагнанный за время простоя панели, не будет списан с пользователей.
+	if err := m.SyncForceDisconnect(ctx); err != nil {
 		log.Printf("MTProto initial sync error: %v", err)
 	}
 
@@ -427,6 +465,11 @@ func (m *Manager) collectAndEnforce(ctx context.Context) {
 	m.mu.Unlock()
 
 	updated := 0
+	// Накапливаем нарушителей, чтобы в конце сделать один общий рестарт контейнера
+	// вместо N последовательных (каждый по 30s timeout). При коинциденции, когда
+	// в одном тике у нескольких юзеров заканчивается лимит/баланс, без коалесценции
+	// мы бы зависли в collectAndEnforce на минуты и пропускали следующие тики.
+	disconnect := false
 	for _, d := range deltas {
 		if err := m.profiles.UpdateTrafficByID(ctx, d.profileID, d.up, d.down); err != nil {
 			log.Printf("MTProto update traffic profile=%d: %v", d.profileID, err)
@@ -434,7 +477,9 @@ func (m *Manager) collectAndEnforce(ctx context.Context) {
 		}
 		updated++
 		if d.limit > 0 && d.total >= d.limit {
-			m.disconnectProfile(ctx, d.profileID, d.total, d.limit)
+			if m.markProfileDisabled(ctx, d.profileID, d.total, d.limit) {
+				disconnect = true
+			}
 		}
 	}
 
@@ -454,10 +499,18 @@ func (m *Manager) collectAndEnforce(ctx context.Context) {
 			continue
 		}
 		if remaining <= 0 {
-			m.DisconnectUserAll(ctx, uid, "balance exhausted")
+			if m.markUserDisabled(ctx, uid, "balance exhausted") {
+				disconnect = true
+			}
 			m.notifyBlock(uid, "balance")
 		} else if remaining <= 1*1024*1024*1024 {
 			m.notifyTrafficLow(uid, remaining)
+		}
+	}
+
+	if disconnect {
+		if err := m.SyncForceDisconnect(ctx); err != nil {
+			log.Printf("MTProto enforce: coalesced sync error: %v", err)
 		}
 	}
 
@@ -491,12 +544,19 @@ func (m *Manager) fetchMetrics(ctx context.Context) (map[string]proxyMetrics, er
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		return nil, fmt.Errorf("status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return parseMetrics(resp.Body), nil
+	metrics, err := parseMetrics(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return metrics, nil
 }
 
-func parseMetrics(r io.Reader) map[string]proxyMetrics {
+func parseMetrics(r io.Reader) (map[string]proxyMetrics, error) {
 	result := make(map[string]proxyMetrics)
 	sc := bufio.NewScanner(r)
+	// Дефолтный буфер 64KB. Поднимаем до 1MB, чтобы при росте числа лейблов
+	// или экспортируемых histogram'ов не получить молчаливый обрыв сканирования.
+	sc.Buffer(make([]byte, 0, 64*1024), 1*1024*1024)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -527,7 +587,10 @@ func parseMetrics(r io.Reader) map[string]proxyMetrics {
 		}
 		result[user] = entry
 	}
-	return result
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("scan metrics: %w", err)
+	}
+	return result, nil
 }
 
 func splitMetricLine(line string) (name, labels, value string, ok bool) {
@@ -577,7 +640,10 @@ func profileIDFromMetric(label string) (int, bool) {
 	return id, true
 }
 
-func (m *Manager) disconnectProfile(ctx context.Context, profileID int, total, limit int64) {
+// markProfileDisabled — тихая версия для коалесценции: апдейтит БД и in-memory,
+// шлёт нотификацию, но БЕЗ рестарта контейнера. Вызывающий код агрегирует
+// возвращаемые true и делает один общий SyncForceDisconnect в конце.
+func (m *Manager) markProfileDisabled(ctx context.Context, profileID int, total, limit int64) bool {
 	m.mu.Lock()
 	m.limits[profileID] = 0
 	m.mu.Unlock()
@@ -585,17 +651,15 @@ func (m *Manager) disconnectProfile(ctx context.Context, profileID int, total, l
 	p, err := m.profiles.GetByID(ctx, profileID)
 	if err != nil {
 		log.Printf("MTProto enforce: profile %d not found: %v", profileID, err)
-		return
+		return false
 	}
 	if err := m.profiles.SetActive(ctx, profileID, false); err != nil {
 		log.Printf("MTProto enforce: failed to deactivate profile=%d: %v", profileID, err)
-		return
-	}
-	if err := m.SyncForceDisconnect(ctx); err != nil {
-		log.Printf("MTProto enforce: sync after profile limit profile=%d: %v", profileID, err)
+		return false
 	}
 	log.Printf("MTProto enforce: profile=%d disabled — limit %d total %d", profileID, limit, total)
 	m.notifyProfileLimit(p.ID, p.UserID, p.Name, limit)
+	return true
 }
 
 func (m *Manager) enforceAll(ctx context.Context) {
@@ -757,8 +821,10 @@ func WriteConfig(cfg *config.Config, profiles []models.MTProtoProfile, path stri
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir mtproto config dir: %w", err)
 	}
+	// 0o600 — в config.py лежат USER secrets и (опционально) SOCKS5_PASSWORD.
+	// mtprotoproxy внутри своего контейнера читает файл тем же UID, что и пишет панель.
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(tmp, b.Bytes(), 0o600); err != nil {
 		return fmt.Errorf("write mtproto config: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

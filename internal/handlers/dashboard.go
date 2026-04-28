@@ -805,6 +805,13 @@ func (h *DashboardHandler) ToggleMTProtoProfile(w http.ResponseWriter, r *http.R
 		if _, ok := h.assertBalance(w, r); !ok {
 			return
 		}
+		// Без этой проверки SetActive(true) пройдёт, но GetAllActive в WriteConfig
+		// отфильтрует профиль обратно — UI покажет "active", а Telegram не подключится.
+		// Через минуту enforceAll снова поставит is_active=false.
+		if profile.ExpiresAt != nil && profile.ExpiresAt.Before(time.Now()) {
+			h.renderError(w, r, http.StatusBadRequest, "Срок прокси истёк", "Удалите прокси и создайте новый.")
+			return
+		}
 		if profile.TrafficLimit > 0 && profile.TrafficUp+profile.TrafficDown >= profile.TrafficLimit {
 			h.renderError(w, r, http.StatusBadRequest, "Лимит прокси превышен", "Увеличьте лимит или поставьте 0 (безлимит) и повторите активацию.")
 			return
