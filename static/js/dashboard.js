@@ -38,6 +38,60 @@ document.addEventListener('click', (e) => {
     }
 });
 
+// Любая мутация (toggle/delete/reset/limit) MTProto-профиля влечёт за собой
+// рестарт контейнера mtprotoproxy на бэке (~5–10 сек), всё это время запрос висит.
+// Чтобы юзер не дёргал кнопки повторно, при submit вешаем полупрозрачный оверлей
+// со спиннером и дизейблим все интерактивные элементы карточки. После редиректа
+// на /dashboard страница перезагрузится — оверлей исчезнет вместе с DOM.
+function lockProfileCard(card, message) {
+    if (card.dataset.locked === '1') return;
+    card.dataset.locked = '1';
+    card.style.position = card.style.position || 'relative';
+    card.querySelectorAll('button, input, select, a').forEach(el => {
+        if (el.tagName === 'A') {
+            el.style.pointerEvents = 'none';
+            el.style.opacity = '0.5';
+        } else {
+            el.disabled = true;
+        }
+    });
+    const overlay = document.createElement('div');
+    overlay.dataset.lockOverlay = '1';
+    overlay.style.cssText = [
+        'position:absolute', 'inset:0', 'background:rgba(15,23,42,0.65)',
+        'display:flex', 'align-items:center', 'justify-content:center',
+        'gap:0.6rem', 'border-radius:inherit', 'z-index:10',
+        'color:#e2e8f0', 'font-size:0.9rem',
+    ].join(';');
+    overlay.innerHTML =
+        '<span class="profile-spinner" style="display:inline-block;width:18px;height:18px;'
+        + 'border:2px solid rgba(226,232,240,0.3);border-top-color:#e2e8f0;'
+        + 'border-radius:50%;animation:profile-spin 0.8s linear infinite;"></span>'
+        + '<span>' + message + '</span>';
+    card.appendChild(overlay);
+}
+
+// Один общий keyframes — добавим в head, если ещё нет.
+(function ensureSpinnerKeyframes() {
+    if (document.getElementById('profile-spinner-style')) return;
+    const style = document.createElement('style');
+    style.id = 'profile-spinner-style';
+    style.textContent = '@keyframes profile-spin { to { transform: rotate(360deg); } }';
+    document.head.appendChild(style);
+})();
+
+document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (e.defaultPrevented) return; // confirm в csp-shim уже отменил
+    const card = form.closest('[data-profile-kind="mtproto"]');
+    if (!card) return;
+    // POST на /dashboard/mtproto/{id}/... — все они вызывают Sync/SyncForceDisconnect.
+    // Sync (SIGUSR2) укладывается в секунду, рестарт — до 10. Всё равно показываем
+    // оверлей: для быстрых операций он мелькнёт незаметно перед reload'ом.
+    lockProfileCard(card, 'Операция выполняется');
+}, false);
+
 function refreshStats() {
     fetch('/dashboard/stats')
         .then(r => r.json())
