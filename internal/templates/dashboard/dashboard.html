@@ -3,7 +3,7 @@
 {{define "title"}}Dashboard — XS VPN{{end}}
 
 {{define "content"}}
-<h1 style="margin: 1.5rem 0;">Мои VPN профили</h1>
+<h1 style="margin: 1.5rem 0;">Мои профили</h1>
 
 <!-- Тариф и подписка -->
 <div class="card">
@@ -90,6 +90,7 @@
 
 <!-- Создание профиля -->
 <div class="card">
+    <h3 style="margin-top: 0;">VPN профиль</h3>
     <form method="POST" action="/dashboard/profiles" style="display: flex; gap: 0.8rem; align-items: end; flex-wrap: wrap;">
                 {{template "csrf" $}}
         <div style="flex: 1; min-width: 150px;">
@@ -108,9 +109,31 @@
     </p>
 </div>
 
+{{if and .MTProtoEnabled .User.IsAdmin}}
+<div class="card">
+    <h3 style="margin-top: 0;">Telegram-прокси</h3>
+    <form method="POST" action="/dashboard/mtproto" style="display: flex; gap: 0.8rem; align-items: end; flex-wrap: wrap;">
+                {{template "csrf" $}}
+        <div style="flex: 1; min-width: 150px;">
+            <label for="mt-name">Имя прокси</label>
+            <input type="text" id="mt-name" name="name" placeholder="telegram, family, ..." maxlength="64" style="margin-bottom: 0;">
+        </div>
+        <div style="min-width: 140px;">
+            <label for="mt-limit-gb">Личный лимит, ГБ</label>
+            <input type="number" id="mt-limit-gb" name="limit_gb" step="0.5" min="0" value="0" style="margin-bottom: 0;">
+        </div>
+        <button type="submit" class="btn btn-primary" data-stat="create-profile-btn"
+                {{if le .TotalAvailable 0}}disabled title="Нет доступного трафика. Оплатите тариф."{{end}}>Создать прокси</button>
+    </form>
+    <p style="color: #64748b; font-size: 0.8rem; margin-top: 0.6rem;">
+        Это MTProto-прокси для Telegram. Трафик списывается из того же общего баланса, что и VPN.
+    </p>
+</div>
+{{end}}
+
 {{if .Profiles}}
 {{range .Profiles}}
-<div class="card" data-profile-id="{{.ID}}" {{if not .IsActive}}style="opacity: 0.6;"{{end}}>
+<div class="card" data-profile-kind="vpn" data-profile-id="{{.ID}}" {{if not .IsActive}}style="opacity: 0.6;"{{end}}>
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <div>
             <strong>{{.Name}}</strong>
@@ -135,7 +158,7 @@
             <button class="btn btn-sm btn-primary" data-action="copy-uri" data-uri="{{.VlessURI}}">Копировать</button>
             <button class="btn btn-sm btn-primary" data-action="show-qr" data-uri="{{.VlessURI}}">QR</button>
             <button class="btn btn-sm btn-primary" data-action="show-profile-chart"
-                    data-profile-id="{{.ID}}" data-profile-name="{{.Name}}">График</button>
+                    data-profile-kind="vpn" data-profile-id="{{.ID}}" data-profile-name="{{.Name}}">График</button>
             <form method="POST" action="/dashboard/profiles/{{.ID}}/toggle" style="display:inline;">
                 {{template "csrf" $}}
                 <input type="hidden" name="action" value="deactivate">
@@ -208,6 +231,96 @@
         Оформите подписку, чтобы создать VPN профиль.
     {{end}}
 </div>
+{{end}}
+
+{{if .MTProtoProfiles}}
+{{range .MTProtoProfiles}}
+<div class="card" data-profile-kind="mtproto" data-profile-id="{{.ID}}" {{if not .IsActive}}style="opacity: 0.6;"{{end}}>
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; flex-wrap: wrap;">
+        <div>
+            <strong>{{.Name}}</strong>
+            <span class="badge badge-gray">Telegram</span>
+            {{if .IsActive}}
+                {{if .IsOnline}}
+                    <span class="badge badge-green" data-stat="status">● online</span>
+                    <span data-stat="ips"><span class="badge badge-blue">{{.CurrentConns}} conn</span></span>
+                {{else}}
+                    <span class="badge badge-blue" data-stat="status">active</span>
+                    <span data-stat="ips"></span>
+                {{end}}
+            {{else if .IsExpired}}
+                <span class="badge badge-red" data-stat="status">expired</span>
+            {{else if .IsOverLimit}}
+                <span class="badge badge-red" data-stat="status">лимит</span>
+            {{else}}
+                <span class="badge badge-red" data-stat="status">disabled</span>
+            {{end}}
+        </div>
+        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+            {{if .IsActive}}
+            <button class="btn btn-sm btn-primary" data-action="copy-uri" data-uri="{{.ProxyURI}}">Копировать</button>
+            <button class="btn btn-sm btn-primary" data-action="show-qr" data-uri="{{.ProxyURI}}">QR</button>
+            <button class="btn btn-sm btn-primary" data-action="show-profile-chart"
+                    data-profile-kind="mtproto" data-profile-id="{{.ID}}" data-profile-name="{{.Name}}">График</button>
+            <form method="POST" action="/dashboard/mtproto/{{.ID}}/toggle" style="display:inline;">
+                {{template "csrf" $}}
+                <input type="hidden" name="action" value="deactivate">
+                <button type="submit" class="btn btn-sm" style="background: #475569; color: white;" title="Выключить прокси">Выкл</button>
+            </form>
+            {{else}}
+            <form method="POST" action="/dashboard/mtproto/{{.ID}}/toggle" style="display:inline;">
+                {{template "csrf" $}}
+                <input type="hidden" name="action" value="activate">
+                <button type="submit" class="btn btn-sm btn-primary" data-stat="activate-btn"
+                        {{if le $.TotalAvailable 0}}disabled title="Нет доступного трафика. Оплатите тариф."{{else}}title="Включить прокси"{{end}}>Вкл</button>
+            </form>
+            {{end}}
+            <form method="POST" action="/dashboard/mtproto/{{.ID}}/reset" style="display:inline;"
+                  data-confirm="Сбросить трафик Telegram-прокси?">
+                {{template "csrf" $}}
+                <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Сброс</button>
+            </form>
+            <form method="POST" action="/dashboard/mtproto/{{.ID}}/delete" style="display:inline;"
+                  data-confirm="Удалить Telegram-прокси? Баланс не изменится — трафик общий на подписку.">
+                {{template "csrf" $}}
+                <button type="submit" class="btn btn-sm btn-danger">✕</button>
+            </form>
+        </div>
+    </div>
+
+    {{if .IsActive}}
+    <div class="uri-box">{{.ProxyURI}}</div>
+    {{end}}
+
+    <div class="stats" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+        <span class="stat" data-stat="up">↑ {{formatBytes .TrafficUp}}</span>
+        <span class="stat" data-stat="down">↓ {{formatBytes .TrafficDown}}</span>
+        <span class="stat" data-stat="total">Σ {{formatBytes .TrafficTotal}}</span>
+        <form method="POST" action="/dashboard/mtproto/{{.ID}}/limit"
+              style="display: flex; gap: 0.3rem; align-items: center; margin-left: auto;"
+              title="Личный лимит прокси (0 = безлимит)">
+                {{template "csrf" $}}
+            <label style="color: #94a3b8; font-size: 0.85rem; margin: 0;">Лимит:</label>
+            <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
+                style="width: 80px; padding: 0.25rem 0.4rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 0.8rem; margin-bottom: 0;">
+            <span style="color: #94a3b8; font-size: 0.8rem;">ГБ</span>
+            <button type="submit" class="btn btn-sm btn-primary">OK</button>
+        </form>
+    </div>
+
+    {{if gt .TrafficLimit 0}}
+    <div style="margin-top: 0.6rem;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.2rem;">
+            <span data-stat="usage-text">{{formatBytes .TrafficTotal}} / {{formatBytes .TrafficLimit}}</span>
+            <span data-stat="usage-pct">{{.UsagePercent}}%</span>
+        </div>
+        <div style="background: #334155; border-radius: 4px; height: 6px; overflow: hidden;">
+            <div data-stat="progress-bar" style="background: {{.ProgressColor}}; width: {{.UsagePercent}}%; height: 100%; border-radius: 4px; max-width: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{end}}
 {{end}}
 
 <!-- График трафика -->

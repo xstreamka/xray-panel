@@ -65,6 +65,23 @@ type Config struct {
 	// Путь к xray config.json (в shared volume)
 	XrayConfigPath string
 
+	// MTProto / Telegram proxy (alexbers/mtprotoproxy)
+	MTProtoEnabled      bool
+	MTProtoServerPort   string
+	MTProtoListenAddr   string
+	MTProtoListenAddr6  string
+	MTProtoConfigPath   string
+	MTProtoMetricsAddr  string
+	MTProtoMetricsPort  int
+	MTProtoContainer    string
+	MTProtoDockerSocket string
+	MTProtoTLSDomain    string
+	MTProtoMaskHost     string
+	MTProtoSocks5Host   string
+	MTProtoSocks5Port   int
+	MTProtoSocks5User   string
+	MTProtoSocks5Pass   string
+
 	// Pay Service — интеграция с xstreamka.dev/pay-service
 	PayServiceURL string // например https://xstreamka.dev
 	WebhookSecret string // общий секрет с pay-service
@@ -118,6 +135,22 @@ func Load() (*Config, error) {
 		PayServiceURL: getEnv("PAY_SERVICE_URL", ""),
 		WebhookSecret: getEnv("WEBHOOK_SECRET", ""),
 	}
+
+	cfg.MTProtoEnabled = getEnvBool("MTPROTO_ENABLED", false)
+	cfg.MTProtoServerPort = getEnv("MTPROTO_SERVER_PORT", "8443")
+	cfg.MTProtoListenAddr = getEnv("MTPROTO_LISTEN_ADDR", "0.0.0.0")
+	cfg.MTProtoListenAddr6 = getEnv("MTPROTO_LISTEN_ADDR_V6", "::")
+	cfg.MTProtoConfigPath = getEnv("MTPROTO_CONFIG_PATH", "/etc/mtprotoproxy/config.py")
+	cfg.MTProtoMetricsAddr = getEnv("MTPROTO_METRICS_ADDR", "127.0.0.1:9091")
+	cfg.MTProtoMetricsPort = getEnvInt("MTPROTO_METRICS_PORT", 9091)
+	cfg.MTProtoContainer = getEnv("MTPROTO_CONTAINER", "xray-panel-mtproto")
+	cfg.MTProtoDockerSocket = getEnv("MTPROTO_DOCKER_SOCKET", "/var/run/docker.sock")
+	cfg.MTProtoTLSDomain = getEnv("MTPROTO_TLS_DOMAIN", "vk.com")
+	cfg.MTProtoMaskHost = getEnv("MTPROTO_MASK_HOST", cfg.MTProtoTLSDomain)
+	cfg.MTProtoSocks5Host = getEnv("MTPROTO_SOCKS5_HOST", "")
+	cfg.MTProtoSocks5Port = getEnvInt("MTPROTO_SOCKS5_PORT", 0)
+	cfg.MTProtoSocks5User = getEnv("MTPROTO_SOCKS5_USER", "")
+	cfg.MTProtoSocks5Pass = getEnv("MTPROTO_SOCKS5_PASS", "")
 
 	if cfg.SecretKey == "" {
 		return nil, fmt.Errorf("SECRET_KEY is required")
@@ -178,6 +211,15 @@ func getEnvInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return fallback

@@ -18,6 +18,7 @@ import (
 	"xray-panel/internal/handlers"
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
+	"xray-panel/internal/mtproto"
 	"xray-panel/internal/subscription"
 	"xray-panel/internal/xray"
 
@@ -43,10 +44,12 @@ func main() {
 
 	userStore := models.NewUserStore(db.Pool)
 	profileStore := models.NewVPNProfileStore(db.Pool)
+	mtProfileStore := models.NewMTProtoProfileStore(db.Pool)
 	tariffStore := models.NewTariffStore(db.Pool)
 	receiptStore := models.NewPaymentReceiptStore(db.Pool)
 	inviteStore := models.NewInviteStore(db.Pool)
 	trafficLogStore := models.NewTrafficLogStore(db.Pool)
+	mtTrafficLogStore := models.NewMTProtoTrafficLogStore(db.Pool)
 
 	// Генерируем Xray config.json из БД
 	activeUUIDs, err := profileStore.GetAllActiveUUIDs(context.Background())
@@ -74,9 +77,14 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore, trafficLogStore, mailer, cfg.BaseURL)
+	mtManager := mtproto.NewManager(cfg, mtProfileStore, userStore, mtTrafficLogStore, mailer, cfg.BaseURL)
+	if cfg.MTProtoEnabled {
+		go mtManager.Run(ctx)
+	}
 
-	subWorker := subscription.NewWorker(userStore, profileStore, mailer, xrayHolder, cfg.BaseURL)
+	go connectXray(ctx, cfg, xrayHolder, profileStore, userStore, trafficLogStore, mailer, cfg.BaseURL, mtManager)
+
+	subWorker := subscription.NewWorker(userStore, profileStore, mailer, xrayHolder, mtManager, cfg.BaseURL)
 	go subWorker.Run(ctx)
 
 	// Шаблоны
@@ -108,15 +116,15 @@ func main() {
 	// Значение продублировано константой handlers.ResetLimitMax для UI-сноски.
 	resetLimiter := middleware.NewRateLimiter(handlers.ResetLimitMax, time.Hour)
 	authHandler := handlers.NewAuthHandler(userStore, inviteStore, authMW, renderer, mailer, cfg.BaseURL, resetLimiter)
-	dashHandler := handlers.NewDashboardHandler(profileStore, userStore, tariffStore, trafficLogStore, xrayHolder, cfg, renderer)
-	adminHandler := handlers.NewAdminHandler(userStore, profileStore, tariffStore, inviteStore, trafficLogStore, xrayHolder, renderer, cfg.BaseURL)
+	dashHandler := handlers.NewDashboardHandler(profileStore, mtProfileStore, userStore, tariffStore, trafficLogStore, mtTrafficLogStore, xrayHolder, mtManager, cfg, renderer)
+	adminHandler := handlers.NewAdminHandler(userStore, profileStore, mtProfileStore, tariffStore, inviteStore, trafficLogStore, mtTrafficLogStore, xrayHolder, mtManager, renderer, cfg.BaseURL)
 	settingsHandler := handlers.NewSettingsHandler(userStore, renderer)
 	// Лимит обратной связи: 3 сообщения в час с одного IP — чтобы форму
 	// нельзя было использовать для спам-флуда на админский ящик.
 	feedbackLimiter := middleware.NewRateLimiter(3, time.Hour)
 	feedbackHandler := handlers.NewFeedbackHandler(renderer, mailer, cfg.FeedbackEmail, feedbackLimiter)
 	payHandler := handlers.NewPayHandler(
-		renderer, tariffStore, receiptStore, userStore, mailer, xrayHolder,
+		renderer, tariffStore, receiptStore, userStore, mailer, xrayHolder, mtManager,
 		cfg.PayServiceURL, cfg.BaseURL, cfg.WebhookSecret,
 	)
 
@@ -185,11 +193,17 @@ func main() {
 			r.Get("/dashboard/stats", dashHandler.StatsJSON)
 			r.Get("/dashboard/traffic", dashHandler.TrafficChart)
 			r.Get("/dashboard/profiles/{id}/traffic", dashHandler.ProfileTrafficChart)
+			r.Get("/dashboard/mtproto/{id}/traffic", dashHandler.MTProtoTrafficChart)
 			r.Post("/dashboard/profiles", dashHandler.CreateProfile)
 			r.Post("/dashboard/profiles/{id}/limit", dashHandler.SetProfileLimit)
 			r.Post("/dashboard/profiles/{id}/toggle", dashHandler.ToggleProfile)
 			r.Post("/dashboard/profiles/{id}/reset", dashHandler.ResetProfileTraffic)
 			r.Post("/dashboard/profiles/{id}/delete", dashHandler.DeleteProfile)
+			r.Post("/dashboard/mtproto", dashHandler.CreateMTProtoProfile)
+			r.Post("/dashboard/mtproto/{id}/limit", dashHandler.SetMTProtoLimit)
+			r.Post("/dashboard/mtproto/{id}/toggle", dashHandler.ToggleMTProtoProfile)
+			r.Post("/dashboard/mtproto/{id}/reset", dashHandler.ResetMTProtoTraffic)
+			r.Post("/dashboard/mtproto/{id}/delete", dashHandler.DeleteMTProtoProfile)
 
 			// Оплата (редирект на pay-service)
 			r.Get("/pay", payHandler.Index)
@@ -214,6 +228,9 @@ func main() {
 				r.Post("/admin/profiles/{id}/toggle", adminHandler.ToggleProfile)
 				r.Post("/admin/profiles/{id}/limit", adminHandler.SetLimit)
 				r.Post("/admin/profiles/{id}/reset", adminHandler.ResetTraffic)
+				r.Post("/admin/mtproto/{id}/toggle", adminHandler.ToggleMTProtoProfile)
+				r.Post("/admin/mtproto/{id}/limit", adminHandler.SetMTProtoLimit)
+				r.Post("/admin/mtproto/{id}/reset", adminHandler.ResetMTProtoTraffic)
 				r.Post("/admin/users/{id}/extra", adminHandler.SetExtraBalance)
 				r.Post("/admin/users/{id}/toggle", adminHandler.ToggleUserActive)
 				r.Post("/admin/users/{id}/subscription", adminHandler.SetSubscription)
@@ -273,6 +290,7 @@ func connectXray(
 	trafficLogs *models.TrafficLogStore,
 	mailer *email.Sender,
 	baseURL string,
+	mtManager *mtproto.Manager,
 ) {
 	firewall := xray.NewFirewall(cfg.ServerPort)
 	firewall.Init()
@@ -297,6 +315,10 @@ func connectXray(
 		syncUsersToXray(ctx, client, profiles)
 
 		collector := xray.NewStatsCollector(client, profiles, users, trafficLogs, firewall, mailer, baseURL)
+		if mtManager != nil {
+			collector.SetUserDisconnectHook(mtManager.DisconnectUserAllLocal)
+			mtManager.SetUserDisconnectHook(collector.DisconnectUserAllLocal)
+		}
 		collector.InitCumulative(ctx)
 		holder.SetCollector(collector)
 		collector.Run(ctx)

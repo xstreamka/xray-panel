@@ -135,7 +135,8 @@ function refreshStats() {
             });
 
             (data.profiles || []).forEach(s => {
-                const card = document.querySelector(`[data-profile-id="${s.id}"]`);
+                const kind = s.kind || 'vpn';
+                const card = document.querySelector(`[data-profile-kind="${kind}"][data-profile-id="${s.id}"]`);
                 if (!card) return;
 
                 const up = card.querySelector('[data-stat="up"]');
@@ -184,6 +185,8 @@ function refreshStats() {
                     const ips = s.online_ips || [];
                     if (s.is_active && s.is_online && ips.length > 0) {
                         ipsEl.innerHTML = ips.map(ip => '<span class="badge badge-blue">' + ip + '</span> ').join('');
+                    } else if (kind === 'mtproto' && s.is_active && s.is_online) {
+                        ipsEl.innerHTML = '<span class="badge badge-blue">' + (s.current_conns || 0) + ' conn</span>';
                     } else {
                         ipsEl.innerHTML = '';
                     }

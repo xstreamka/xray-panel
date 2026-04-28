@@ -15,6 +15,7 @@ import (
 
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
+	"xray-panel/internal/mtproto"
 	"xray-panel/internal/xray"
 
 	"github.com/go-chi/chi/v5"
@@ -23,10 +24,13 @@ import (
 type AdminHandler struct {
 	users       *models.UserStore
 	profiles    *models.VPNProfileStore
+	mtProfiles  *models.MTProtoProfileStore
 	tariffs     *models.TariffStore
 	invites     *models.InviteStore
 	trafficLogs *models.TrafficLogStore
+	mtTraffic   *models.MTProtoTrafficLogStore
 	xrayHolder  *xray.Holder
+	mtManager   *mtproto.Manager
 	renderer    *Renderer
 	baseURL     string
 }
@@ -34,17 +38,20 @@ type AdminHandler struct {
 func NewAdminHandler(
 	users *models.UserStore,
 	profiles *models.VPNProfileStore,
+	mtProfiles *models.MTProtoProfileStore,
 	tariffs *models.TariffStore,
 	invites *models.InviteStore,
 	trafficLogs *models.TrafficLogStore,
+	mtTraffic *models.MTProtoTrafficLogStore,
 	xrayHolder *xray.Holder,
+	mtManager *mtproto.Manager,
 	renderer *Renderer,
 	baseURL string,
 ) *AdminHandler {
 	return &AdminHandler{
-		users: users, profiles: profiles, tariffs: tariffs, invites: invites,
-		trafficLogs: trafficLogs,
-		xrayHolder:  xrayHolder, renderer: renderer, baseURL: baseURL,
+		users: users, profiles: profiles, mtProfiles: mtProfiles, tariffs: tariffs, invites: invites,
+		trafficLogs: trafficLogs, mtTraffic: mtTraffic,
+		xrayHolder: xrayHolder, mtManager: mtManager, renderer: renderer, baseURL: baseURL,
 	}
 }
 
@@ -60,21 +67,33 @@ type adminProfileView struct {
 	ProgressColor string
 }
 
+type adminMTProtoProfileView struct {
+	models.MTProtoProfile
+	ProxyURI      string
+	IsOnline      bool
+	CurrentConns  int64
+	TrafficTotal  int64
+	UsagePercent  int
+	ProgressColor string
+}
+
 // adminUserView — пользователь + агрегаты + профили. Один общий тип для
 // списка /admin и детальной карточки /admin/users/{id}, чтобы шаблоны
 // обращались к одним и тем же полям. Поля Base/ExtraPercent и ExtraUsed —
 // для прогресс-баров на карточке (в списке не используются).
 type adminUserView struct {
 	models.User
-	Profiles     []adminProfileView
-	TotalTraffic int64
-	ActiveCount  int
-	OnlineCount  int
-	TariffLabel  string
-	DaysLeft     int
-	BasePercent  int
-	ExtraUsed    int64
-	ExtraPercent int
+	Profiles        []adminProfileView
+	MTProtoProfiles []adminMTProtoProfileView
+	TotalTraffic    int64
+	ActiveCount     int
+	ProfileCount    int
+	OnlineCount     int
+	TariffLabel     string
+	DaysLeft        int
+	BasePercent     int
+	ExtraUsed       int64
+	ExtraPercent    int
 }
 
 // progressColor — цветовая шкала для прогресс-бара. Совпадает с dashboard:
@@ -136,6 +155,13 @@ func urlParseRef(ref string) (string, error) {
 	return u.Path, nil
 }
 
+func (h *AdminHandler) buildMTProtoLink(secretHex string) string {
+	if h.mtManager == nil {
+		return ""
+	}
+	return h.mtManager.Link(secretHex)
+}
+
 // enrichAllProfiles добавляет live-трафик и онлайн-статус ко всем профилям
 func (h *AdminHandler) enrichAllProfiles(ctx context.Context, profiles []models.VPNProfile) (
 	enriched []models.VPNProfile,
@@ -180,11 +206,34 @@ func (h *AdminHandler) enrichAllProfiles(ctx context.Context, profiles []models.
 	return
 }
 
+func (h *AdminHandler) enrichAllMTProtoProfiles(profiles []models.MTProtoProfile) (
+	enriched []models.MTProtoProfile,
+	online map[int]bool,
+	conns map[int]int64,
+) {
+	enriched = profiles
+	online = make(map[int]bool)
+	conns = make(map[int]int64)
+	if h.mtManager == nil {
+		return
+	}
+	liveTraffic, liveOnline, liveConns := h.mtManager.Snapshot()
+	for i, p := range enriched {
+		if stats, ok := liveTraffic[p.ID]; ok {
+			enriched[i].TrafficUp += stats[0]
+			enriched[i].TrafficDown += stats[1]
+		}
+	}
+	online = liveOnline
+	conns = liveConns
+	return
+}
+
 // buildUserView собирает полный view для одного юзера: агрегаты по профилям,
 // имя текущего тарифа, дни до истечения. tariffNames — кеш по ID для случаев,
 // когда view строится для списка (чтобы не дёргать GetByID в цикле).
 func (h *AdminHandler) buildUserView(
-	ctx context.Context, u models.User, profs []adminProfileView, tariffNames map[int]string,
+	ctx context.Context, u models.User, profs []adminProfileView, mtProfs []adminMTProtoProfileView, tariffNames map[int]string,
 ) adminUserView {
 	// Для каждого профиля с личным лимитом считаем процент/цвет, чтобы
 	// шаблон мог нарисовать прогресс-бар в таблице.
@@ -201,9 +250,32 @@ func (h *AdminHandler) buildUserView(
 		profs[i].UsagePercent = pct
 		profs[i].ProgressColor = progressColor(pct)
 	}
+	for i := range mtProfs {
+		mtProfs[i].TrafficTotal = mtProfs[i].TrafficUp + mtProfs[i].TrafficDown
+		tl := mtProfs[i].TrafficLimit
+		if tl <= 0 {
+			continue
+		}
+		pct := int(float64(mtProfs[i].TrafficTotal) / float64(tl) * 100)
+		if pct > 100 {
+			pct = 100
+		}
+		mtProfs[i].UsagePercent = pct
+		mtProfs[i].ProgressColor = progressColor(pct)
+	}
 
-	v := adminUserView{User: u, Profiles: profs}
+	v := adminUserView{User: u, Profiles: profs, MTProtoProfiles: mtProfs}
+	v.ProfileCount = len(v.Profiles) + len(v.MTProtoProfiles)
 	for _, p := range v.Profiles {
+		v.TotalTraffic += p.TrafficUp + p.TrafficDown
+		if p.IsActive {
+			v.ActiveCount++
+		}
+		if p.IsOnline {
+			v.OnlineCount++
+		}
+	}
+	for _, p := range v.MTProtoProfiles {
 		v.TotalTraffic += p.TrafficUp + p.TrafficDown
 		if p.IsActive {
 			v.ActiveCount++
@@ -272,6 +344,13 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 
 	profiles, onlineUsers, onlineIPs := h.enrichAllProfiles(r.Context(), profiles)
 
+	mtProfiles, err := h.mtProfiles.ListAll(r.Context())
+	if err != nil {
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	mtProfiles, mtOnline, mtConns := h.enrichAllMTProtoProfiles(mtProfiles)
+
 	// Имена тарифов для отображения текущей подписки юзера
 	subPlans, err := h.tariffs.ListActiveByKind(r.Context(), models.TariffKindSubscription)
 	if err != nil {
@@ -290,10 +369,19 @@ func (h *AdminHandler) Users(w http.ResponseWriter, r *http.Request) {
 			OnlineIPs:  onlineIPs[p.UUID],
 		})
 	}
+	mtProfilesByUser := make(map[int][]adminMTProtoProfileView)
+	for _, p := range mtProfiles {
+		mtProfilesByUser[p.UserID] = append(mtProfilesByUser[p.UserID], adminMTProtoProfileView{
+			MTProtoProfile: p,
+			ProxyURI:       h.buildMTProtoLink(p.SecretHex),
+			IsOnline:       p.IsActive && mtOnline[p.ID],
+			CurrentConns:   mtConns[p.ID],
+		})
+	}
 
 	views := make([]adminUserView, 0, len(users))
 	for _, u := range users {
-		views = append(views, h.buildUserView(r.Context(), u, profilesByUser[u.ID], tariffNames))
+		views = append(views, h.buildUserView(r.Context(), u, profilesByUser[u.ID], mtProfilesByUser[u.ID], tariffNames))
 	}
 
 	h.renderer.Render(w, r, "admin.html", map[string]any{
@@ -331,12 +419,29 @@ func (h *AdminHandler) UserView(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	mtProfs, err := h.mtProfiles.GetByUserID(r.Context(), id)
+	if err != nil {
+		log.Printf("Admin: list mtproto profiles for user %d: %v", id, err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	mtEnriched, mtOnline, mtConns := h.enrichAllMTProtoProfiles(mtProfs)
+	mtView := make([]adminMTProtoProfileView, 0, len(mtEnriched))
+	for _, p := range mtEnriched {
+		mtView = append(mtView, adminMTProtoProfileView{
+			MTProtoProfile: p,
+			ProxyURI:       h.buildMTProtoLink(p.SecretHex),
+			IsOnline:       p.IsActive && mtOnline[p.ID],
+			CurrentConns:   mtConns[p.ID],
+		})
+	}
+
 	subPlans, err := h.tariffs.ListActiveByKind(r.Context(), models.TariffKindSubscription)
 	if err != nil {
 		log.Printf("Admin: list sub tariffs error: %v", err)
 	}
 
-	view := h.buildUserView(r.Context(), *u, profView, nil)
+	view := h.buildUserView(r.Context(), *u, profView, mtView, nil)
 
 	// Если юзер пришёл по инвайту, покажем кликабельный бейдж с переходом на
 	// страницу инвайта — для расследования утечки через учётку.
@@ -457,6 +562,80 @@ func (h *AdminHandler) ResetTraffic(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
 }
 
+func (h *AdminHandler) ToggleMTProtoProfile(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	action := r.FormValue("action")
+	profile, err := h.mtProfiles.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Прокси не найден", http.StatusNotFound)
+		return
+	}
+
+	switch action {
+	case "activate":
+		if err := h.mtProfiles.SetActive(r.Context(), id, true); err != nil {
+			log.Printf("Admin: mtproto activate error: %v", err)
+		}
+		profile.IsActive = true
+		if h.mtManager != nil {
+			h.mtManager.RegisterProfile(r.Context(), profile)
+		}
+		log.Printf("Admin: mtproto profile %d activated", id)
+	case "deactivate":
+		if err := h.mtProfiles.SetActive(r.Context(), id, false); err != nil {
+			log.Printf("Admin: mtproto deactivate error: %v", err)
+		}
+		if h.mtManager != nil {
+			if err := h.mtManager.Sync(r.Context()); err != nil {
+				log.Printf("Admin: mtproto sync after deactivate: %v", err)
+			}
+		}
+		log.Printf("Admin: mtproto profile %d deactivated", id)
+	default:
+		http.Error(w, "Неизвестное действие", http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
+}
+
+func (h *AdminHandler) SetMTProtoLimit(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	limitGB, _ := strconv.ParseFloat(r.FormValue("limit_gb"), 64)
+	limitBytes := int64(limitGB * 1024 * 1024 * 1024)
+
+	if err := h.mtProfiles.SetLimit(r.Context(), id, limitBytes); err != nil {
+		log.Printf("Admin: mtproto set limit error: %v", err)
+	}
+	if h.mtManager != nil {
+		h.mtManager.UpdateLimit(id, limitBytes)
+	}
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
+}
+
+func (h *AdminHandler) ResetMTProtoTraffic(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	profile, err := h.mtProfiles.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Прокси не найден", http.StatusNotFound)
+		return
+	}
+	if err := h.mtProfiles.ResetTraffic(r.Context(), id); err != nil {
+		log.Printf("Admin: mtproto reset traffic error: %v", err)
+	}
+	if h.mtManager != nil {
+		h.mtManager.ResetCumulative(id)
+	}
+	if !profile.IsActive {
+		h.mtProfiles.SetActive(r.Context(), id, true)
+		profile.IsActive = true
+		if h.mtManager != nil {
+			h.mtManager.RegisterProfile(r.Context(), profile)
+		}
+		log.Printf("Admin: mtproto profile %d reactivated after traffic reset", id)
+	}
+	http.Redirect(w, r, adminRedirectBack(r), http.StatusSeeOther)
+}
+
 // SetExtraBalance — POST /admin/users/{id}/extra — установить extra-баланс
 // в ровно заданное значение (ГБ). Используется для ручной коррекции: и для
 // добавления, и для списания, и для сброса в 0.
@@ -481,6 +660,9 @@ func (h *AdminHandler) SetExtraBalance(w http.ResponseWriter, r *http.Request) {
 	if bytes > 0 {
 		if collector := h.xrayHolder.GetCollector(); collector != nil {
 			collector.ReactivateUserAll(r.Context(), userID)
+		}
+		if h.mtManager != nil {
+			h.mtManager.ReactivateUserAll(r.Context(), userID)
 		}
 	}
 
@@ -532,6 +714,9 @@ func (h *AdminHandler) SetSubscription(w http.ResponseWriter, r *http.Request) {
 	if collector := h.xrayHolder.GetCollector(); collector != nil {
 		collector.ReactivateUserAll(r.Context(), userID)
 	}
+	if h.mtManager != nil {
+		h.mtManager.ReactivateUserAll(r.Context(), userID)
+	}
 
 	log.Printf("Admin: activated subscription user=%d tariff=%s duration=%d base=%.1f GB",
 		userID, tariff.Code, durationDays, tariff.TrafficGB)
@@ -565,6 +750,8 @@ func (h *AdminHandler) ToggleUserActive(w http.ResponseWriter, r *http.Request) 
 		}
 		if collector := h.xrayHolder.GetCollector(); collector != nil {
 			collector.DisconnectUserAll(r.Context(), userID, "user deactivated by admin")
+		} else if h.mtManager != nil {
+			h.mtManager.DisconnectUserAllLocal(r.Context(), userID, "user deactivated by admin")
 		}
 		log.Printf("Admin: user %d deactivated", userID)
 
@@ -596,6 +783,7 @@ func (h *AdminHandler) CancelSubscription(w http.ResponseWriter, r *http.Request
 
 type adminProfileStatsJSON struct {
 	ID              int      `json:"id"`
+	Kind            string   `json:"kind"`
 	IsActive        bool     `json:"is_active"`
 	IsOnline        bool     `json:"is_online"`
 	IsExpired       bool     `json:"is_expired"`
@@ -609,6 +797,7 @@ type adminProfileStatsJSON struct {
 	TrafficLimitFmt string   `json:"traffic_limit_fmt"`
 	UsagePercent    int      `json:"usage_percent"`
 	ProgressColor   string   `json:"progress_color"`
+	CurrentConns    int64    `json:"current_conns"`
 }
 
 type adminUserStatsJSON struct {
@@ -631,6 +820,7 @@ type adminUserStatsJSON struct {
 	ExtraUsedFmt    string                  `json:"extra_used_fmt"`
 	ExtraGrantedFmt string                  `json:"extra_granted_fmt"`
 	Profiles        []adminProfileStatsJSON `json:"profiles"`
+	MTProtoProfiles []adminProfileStatsJSON `json:"mtproto_profiles"`
 }
 
 func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
@@ -648,6 +838,13 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 
 	profiles, onlineUsers, onlineIPs := h.enrichAllProfiles(r.Context(), profiles)
 
+	mtProfiles, err := h.mtProfiles.ListAll(r.Context())
+	if err != nil {
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	mtProfiles, mtOnline, mtConns := h.enrichAllMTProtoProfiles(mtProfiles)
+
 	type profByUser struct {
 		models.VPNProfile
 		IsOnline  bool
@@ -659,6 +856,19 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			VPNProfile: p,
 			IsOnline:   p.IsActive && onlineUsers[p.UUID],
 			OnlineIPs:  onlineIPs[p.UUID],
+		})
+	}
+	type mtProfByUser struct {
+		models.MTProtoProfile
+		IsOnline     bool
+		CurrentConns int64
+	}
+	mtProfilesByUser := make(map[int][]mtProfByUser)
+	for _, p := range mtProfiles {
+		mtProfilesByUser[p.UserID] = append(mtProfilesByUser[p.UserID], mtProfByUser{
+			MTProtoProfile: p,
+			IsOnline:       p.IsActive && mtOnline[p.ID],
+			CurrentConns:   mtConns[p.ID],
 		})
 	}
 
@@ -721,6 +931,7 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			isOverLimit := p.TrafficLimit > 0 && profTotal >= p.TrafficLimit
 			uv.Profiles = append(uv.Profiles, adminProfileStatsJSON{
 				ID:              p.ID,
+				Kind:            "vpn",
 				IsActive:        p.IsActive,
 				IsOnline:        p.IsOnline,
 				IsExpired:       isExpired,
@@ -734,6 +945,42 @@ func (h *AdminHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 				TrafficLimitFmt: formatBytesGo(p.TrafficLimit),
 				UsagePercent:    profPct,
 				ProgressColor:   profColor,
+			})
+		}
+		for _, p := range mtProfilesByUser[u.ID] {
+			totalTraffic += p.TrafficUp + p.TrafficDown
+			if p.IsOnline {
+				uv.OnlineCount++
+			}
+			profTotal := p.TrafficUp + p.TrafficDown
+			profPct := 0
+			profColor := ""
+			if p.TrafficLimit > 0 {
+				used := profTotal
+				if used > p.TrafficLimit {
+					used = p.TrafficLimit
+				}
+				profPct = int(float64(used) / float64(p.TrafficLimit) * 100)
+				profColor = progressColor(profPct)
+			}
+			isExpired := p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now())
+			isOverLimit := p.TrafficLimit > 0 && profTotal >= p.TrafficLimit
+			uv.MTProtoProfiles = append(uv.MTProtoProfiles, adminProfileStatsJSON{
+				ID:              p.ID,
+				Kind:            "mtproto",
+				IsActive:        p.IsActive,
+				IsOnline:        p.IsOnline,
+				IsExpired:       isExpired,
+				IsOverLimit:     isOverLimit,
+				TrafficUp:       formatBytesGo(p.TrafficUp),
+				TrafficDown:     formatBytesGo(p.TrafficDown),
+				TrafficTotal:    profTotal,
+				TrafficLimit:    p.TrafficLimit,
+				TrafficTotalFmt: formatBytesGo(profTotal),
+				TrafficLimitFmt: formatBytesGo(p.TrafficLimit),
+				UsagePercent:    profPct,
+				ProgressColor:   profColor,
+				CurrentConns:    p.CurrentConns,
 			})
 		}
 		uv.Total = formatBytesGo(totalTraffic)

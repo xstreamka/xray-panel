@@ -13,6 +13,7 @@
 
     let chart = null;
     let currentProfileId = null;
+    let currentProfileKind = 'vpn';
     let currentRange = '24h';
 
     function formatBytes(b) {
@@ -121,8 +122,9 @@
         });
     }
 
-    function load(profileId, range) {
+    function load(profileId, profileKind, range) {
         currentProfileId = profileId;
+        currentProfileKind = profileKind || 'vpn';
         currentRange = range;
 
         rangeBox.querySelectorAll('button[data-range]').forEach((b) => {
@@ -132,7 +134,8 @@
             b.style.color = active ? '' : '#e2e8f0';
         });
 
-        fetch('/dashboard/profiles/' + encodeURIComponent(profileId) + '/traffic?range=' + encodeURIComponent(range))
+        const base = currentProfileKind === 'mtproto' ? '/dashboard/mtproto/' : '/dashboard/profiles/';
+        fetch(base + encodeURIComponent(profileId) + '/traffic?range=' + encodeURIComponent(range))
             .then((r) => r.ok ? r.json() : Promise.reject(r.status))
             .then(render)
             .catch((err) => console.error('profile chart load:', err));
@@ -141,7 +144,7 @@
     rangeBox.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-range]');
         if (!btn || !currentProfileId) return;
-        load(currentProfileId, btn.dataset.range);
+        load(currentProfileId, currentProfileKind, btn.dataset.range);
     });
 
     // Закрытие по Escape.
@@ -154,10 +157,11 @@
     // Экспорт в глобал — кнопка «График» в HTML вызывает onclick="showProfileChart(this)".
     window.showProfileChart = function (btn) {
         const profileId = btn.dataset.profileId;
+        const profileKind = btn.dataset.profileKind || 'vpn';
         const profileName = btn.dataset.profileName || '';
         if (!profileId) return;
         nameEl.textContent = profileName;
         modal.style.display = 'flex';
-        load(profileId, '24h');
+        load(profileId, profileKind, '24h');
     };
 })();

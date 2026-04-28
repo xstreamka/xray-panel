@@ -16,6 +16,7 @@ import (
 	"xray-panel/internal/config"
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
+	"xray-panel/internal/mtproto"
 	"xray-panel/internal/xray"
 
 	"github.com/go-chi/chi/v5"
@@ -24,27 +25,33 @@ import (
 
 type DashboardHandler struct {
 	profiles    *models.VPNProfileStore
+	mtProfiles  *models.MTProtoProfileStore
 	users       *models.UserStore
 	tariffs     *models.TariffStore
 	trafficLogs *models.TrafficLogStore
+	mtTraffic   *models.MTProtoTrafficLogStore
 	xrayHolder  *xray.Holder
+	mtManager   *mtproto.Manager
 	cfg         *config.Config
 	renderer    *Renderer
 }
 
 func NewDashboardHandler(
 	profiles *models.VPNProfileStore,
+	mtProfiles *models.MTProtoProfileStore,
 	users *models.UserStore,
 	tariffs *models.TariffStore,
 	trafficLogs *models.TrafficLogStore,
+	mtTraffic *models.MTProtoTrafficLogStore,
 	xrayHolder *xray.Holder,
+	mtManager *mtproto.Manager,
 	cfg *config.Config,
 	renderer *Renderer,
 ) *DashboardHandler {
 	return &DashboardHandler{
-		profiles: profiles, users: users, tariffs: tariffs,
-		trafficLogs: trafficLogs,
-		xrayHolder:  xrayHolder, cfg: cfg, renderer: renderer,
+		profiles: profiles, mtProfiles: mtProfiles, users: users, tariffs: tariffs,
+		trafficLogs: trafficLogs, mtTraffic: mtTraffic,
+		xrayHolder: xrayHolder, mtManager: mtManager, cfg: cfg, renderer: renderer,
 	}
 }
 
@@ -59,6 +66,19 @@ type profileView struct {
 	IsOnline      bool
 	OnlineIPs     []string
 	Remaining     int64 // остаток ЛОКАЛЬНОГО лимита профиля (если задан)
+}
+
+type mtProtoProfileView struct {
+	models.MTProtoProfile
+	ProxyURI      template.URL
+	TrafficTotal  int64
+	UsagePercent  int
+	ProgressColor string
+	IsExpired     bool
+	IsOverLimit   bool
+	IsOnline      bool
+	CurrentConns  int64
+	Remaining     int64
 }
 
 // errorAction — дополнительная кнопка на странице ошибки помимо «Назад».
@@ -99,12 +119,20 @@ func (h *DashboardHandler) assertBalance(w http.ResponseWriter, r *http.Request)
 		h.renderError(w, r,
 			http.StatusForbidden,
 			"Нет доступного трафика",
-			"Чтобы управлять VPN профилями, оформите или продлите тариф.",
+			"Чтобы управлять профилями, оформите или продлите тариф.",
 			errorAction{Label: "Оплатить тариф", URL: "/pay"},
 		)
 		return nil, false
 	}
 	return user, true
+}
+
+func (h *DashboardHandler) assertMTProto(w http.ResponseWriter, r *http.Request) bool {
+	if h.cfg.MTProtoEnabled && h.mtManager != nil {
+		return true
+	}
+	h.renderError(w, r, http.StatusServiceUnavailable, "Telegram-прокси недоступен", "MTProto-сервис не включён на сервере.")
+	return false
 }
 
 func (h *DashboardHandler) enrichProfiles(ctx context.Context, profiles []models.VPNProfile) (
@@ -147,6 +175,30 @@ func (h *DashboardHandler) enrichProfiles(ctx context.Context, profiles []models
 		onlineIPs = client.GetOnlineIPs(ctx, onlineUsers)
 	}
 
+	return
+}
+
+func (h *DashboardHandler) enrichMTProtoProfiles(profiles []models.MTProtoProfile) (
+	enriched []models.MTProtoProfile,
+	online map[int]bool,
+	conns map[int]int64,
+) {
+	enriched = profiles
+	online = make(map[int]bool)
+	conns = make(map[int]int64)
+
+	if h.mtManager == nil {
+		return
+	}
+	liveTraffic, liveOnline, liveConns := h.mtManager.Snapshot()
+	for i, p := range enriched {
+		if stats, ok := liveTraffic[p.ID]; ok {
+			enriched[i].TrafficUp += stats[0]
+			enriched[i].TrafficDown += stats[1]
+		}
+	}
+	online = liveOnline
+	conns = liveConns
 	return
 }
 
@@ -238,6 +290,41 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 		views = append(views, v)
 	}
 
+	mtProfiles, err := h.mtProfiles.GetByUserID(r.Context(), user.ID)
+	if err != nil {
+		h.renderError(w, r, http.StatusInternalServerError, "Ошибка", "Не удалось загрузить список Telegram-прокси. Попробуйте позже.")
+		return
+	}
+	mtProfiles, mtOnline, mtConns := h.enrichMTProtoProfiles(mtProfiles)
+	var mtViews []mtProtoProfileView
+	for _, p := range mtProfiles {
+		v := mtProtoProfileView{
+			MTProtoProfile: p,
+			ProxyURI:       template.URL(mtproto.BuildLink(h.cfg, p.SecretHex)),
+			TrafficTotal:   p.TrafficUp + p.TrafficDown,
+			IsOnline:       p.IsActive && mtOnline[p.ID],
+			CurrentConns:   mtConns[p.ID],
+		}
+		if p.TrafficLimit > 0 {
+			used := v.TrafficTotal
+			v.Remaining = p.TrafficLimit - used
+			if v.Remaining < 0 {
+				v.Remaining = 0
+			}
+			pct := int(float64(used) / float64(p.TrafficLimit) * 100)
+			if pct > 100 {
+				pct = 100
+			}
+			v.UsagePercent = pct
+			v.IsOverLimit = used >= p.TrafficLimit
+			v.ProgressColor = progressColor(pct)
+		}
+		if p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now()) {
+			v.IsExpired = true
+		}
+		mtViews = append(mtViews, v)
+	}
+
 	// Свежий юзер для состояния подписки и баланса (cookie может быть stale)
 	freshUser, _ := h.users.GetByID(r.Context(), user.ID)
 	if freshUser != nil {
@@ -290,17 +377,19 @@ func (h *DashboardHandler) Index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderer.Render(w, r, "dashboard.html", map[string]any{
-		"Active":         "dashboard",
-		"User":           user,
-		"Profiles":       views,
-		"TariffLabel":    tariffLabel,
-		"BaseRemaining":  baseRemaining,
-		"BasePercent":    basePercent,
-		"ExtraUsed":      extraUsed,
-		"ExtraPercent":   extraPercent,
-		"DaysLeft":       daysLeft,
-		"HasActiveSub":   user.HasActiveSubscription(),
-		"TotalAvailable": user.TotalAvailable(),
+		"Active":          "dashboard",
+		"User":            user,
+		"Profiles":        views,
+		"MTProtoProfiles": mtViews,
+		"MTProtoEnabled":  h.cfg.MTProtoEnabled,
+		"TariffLabel":     tariffLabel,
+		"BaseRemaining":   baseRemaining,
+		"BasePercent":     basePercent,
+		"ExtraUsed":       extraUsed,
+		"ExtraPercent":    extraPercent,
+		"DaysLeft":        daysLeft,
+		"HasActiveSub":    user.HasActiveSubscription(),
+		"TotalAvailable":  user.TotalAvailable(),
 	})
 }
 
@@ -601,8 +690,215 @@ func (h *DashboardHandler) DeleteProfile(w http.ResponseWriter, r *http.Request)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
+func (h *DashboardHandler) CreateMTProtoProfile(w http.ResponseWriter, r *http.Request) {
+	if !h.assertMTProto(w, r) {
+		return
+	}
+	user, ok := h.assertBalance(w, r)
+	if !ok {
+		return
+	}
+	if !user.IsAdmin {
+		h.renderError(w, r, http.StatusForbidden, "Недоступно", "Создание Telegram-прокси доступно только администраторам.")
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		name = "telegram"
+	}
+	if utf8.RuneCountInString(name) > 64 {
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Имя прокси слишком длинное (максимум 64 символа).")
+		return
+	}
+
+	var limitBytes int64
+	if s := strings.TrimSpace(r.FormValue("limit_gb")); s != "" {
+		limitGB, err := strconv.ParseFloat(s, 64)
+		if err != nil || limitGB < 0 {
+			h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректное значение лимита.")
+			return
+		}
+		limitBytes = int64(limitGB * 1024 * 1024 * 1024)
+	}
+
+	secretHex, err := models.GenerateMTProtoSecretHex()
+	if err != nil {
+		h.renderError(w, r, http.StatusInternalServerError, "Ошибка", "Не удалось сгенерировать ключ прокси.")
+		return
+	}
+	profile, err := h.mtProfiles.Create(r.Context(), user.ID, secretHex, name)
+	if err != nil {
+		h.renderError(w, r, http.StatusBadRequest, "Не удалось создать Telegram-прокси", err.Error())
+		return
+	}
+	if limitBytes > 0 {
+		if err := h.mtProfiles.SetLimit(r.Context(), profile.ID, limitBytes); err != nil {
+			log.Printf("Dashboard: mtproto set limit profile=%d: %v", profile.ID, err)
+		}
+		profile.TrafficLimit = limitBytes
+	}
+	h.mtManager.RegisterProfile(r.Context(), profile)
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func (h *DashboardHandler) SetMTProtoLimit(w http.ResponseWriter, r *http.Request) {
+	if !h.assertMTProto(w, r) {
+		return
+	}
+	user, ok := h.assertBalance(w, r)
+	if !ok {
+		return
+	}
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректный идентификатор прокси.")
+		return
+	}
+	profile, err := h.mtProfiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		h.renderError(w, r, http.StatusNotFound, "Прокси не найден", "Проверьте, что вы редактируете свой Telegram-прокси.")
+		return
+	}
+	limitGB, err := strconv.ParseFloat(strings.TrimSpace(r.FormValue("limit_gb")), 64)
+	if err != nil || limitGB < 0 {
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректное значение лимита.")
+		return
+	}
+	limitBytes := int64(limitGB * 1024 * 1024 * 1024)
+	if err := h.mtProfiles.SetLimit(r.Context(), id, limitBytes); err != nil {
+		log.Printf("Dashboard: mtproto set limit profile=%d user=%d: %v", id, user.ID, err)
+		h.renderError(w, r, http.StatusInternalServerError, "Ошибка", "Не удалось сохранить лимит. Попробуйте позже.")
+		return
+	}
+	h.mtManager.UpdateLimit(id, limitBytes)
+	if !profile.IsActive {
+		totalTraffic := profile.TrafficUp + profile.TrafficDown
+		if limitBytes == 0 || totalTraffic < limitBytes {
+			h.reactivateMTProtoProfile(r.Context(), profile, limitBytes)
+		}
+	}
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func (h *DashboardHandler) ToggleMTProtoProfile(w http.ResponseWriter, r *http.Request) {
+	if !h.assertMTProto(w, r) {
+		return
+	}
+	user := middleware.UserFromContext(r.Context())
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректный идентификатор прокси.")
+		return
+	}
+	profile, err := h.mtProfiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		h.renderError(w, r, http.StatusNotFound, "Прокси не найден", "Проверьте, что вы управляете своим Telegram-прокси.")
+		return
+	}
+
+	switch r.FormValue("action") {
+	case "activate":
+		if profile.IsActive {
+			http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+			return
+		}
+		if _, ok := h.assertBalance(w, r); !ok {
+			return
+		}
+		if profile.TrafficLimit > 0 && profile.TrafficUp+profile.TrafficDown >= profile.TrafficLimit {
+			h.renderError(w, r, http.StatusBadRequest, "Лимит прокси превышен", "Увеличьте лимит или поставьте 0 (безлимит) и повторите активацию.")
+			return
+		}
+		h.reactivateMTProtoProfile(r.Context(), profile, profile.TrafficLimit)
+	case "deactivate":
+		if profile.IsActive {
+			h.deactivateMTProtoProfile(r.Context(), profile)
+		}
+	default:
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Неизвестное действие.")
+		return
+	}
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func (h *DashboardHandler) reactivateMTProtoProfile(ctx context.Context, p *models.MTProtoProfile, limitBytes int64) {
+	if err := h.mtProfiles.SetActive(ctx, p.ID, true); err != nil {
+		log.Printf("Dashboard: mtproto reactivate SetActive profile=%d: %v", p.ID, err)
+		return
+	}
+	p.IsActive = true
+	p.TrafficLimit = limitBytes
+	h.mtManager.RegisterProfile(ctx, p)
+}
+
+func (h *DashboardHandler) deactivateMTProtoProfile(ctx context.Context, p *models.MTProtoProfile) {
+	if err := h.mtProfiles.SetActive(ctx, p.ID, false); err != nil {
+		log.Printf("Dashboard: mtproto deactivate SetActive profile=%d: %v", p.ID, err)
+		return
+	}
+	if err := h.mtManager.Sync(ctx); err != nil {
+		log.Printf("Dashboard: mtproto deactivate sync profile=%d: %v", p.ID, err)
+	}
+}
+
+func (h *DashboardHandler) ResetMTProtoTraffic(w http.ResponseWriter, r *http.Request) {
+	if !h.assertMTProto(w, r) {
+		return
+	}
+	user, ok := h.assertBalance(w, r)
+	if !ok {
+		return
+	}
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректный идентификатор прокси.")
+		return
+	}
+	profile, err := h.mtProfiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		h.renderError(w, r, http.StatusNotFound, "Прокси не найден", "Проверьте, что вы сбрасываете трафик на своём Telegram-прокси.")
+		return
+	}
+	if err := h.mtProfiles.ResetTraffic(r.Context(), id); err != nil {
+		log.Printf("Dashboard: mtproto reset traffic profile=%d: %v", id, err)
+		h.renderError(w, r, http.StatusInternalServerError, "Ошибка", "Не удалось сбросить трафик. Попробуйте позже.")
+		return
+	}
+	h.mtManager.ResetCumulative(id)
+	if !profile.IsActive {
+		h.reactivateMTProtoProfile(r.Context(), profile, profile.TrafficLimit)
+	}
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func (h *DashboardHandler) DeleteMTProtoProfile(w http.ResponseWriter, r *http.Request) {
+	if !h.assertMTProto(w, r) {
+		return
+	}
+	user, ok := h.assertBalance(w, r)
+	if !ok {
+		return
+	}
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		h.renderError(w, r, http.StatusBadRequest, "Ошибка", "Некорректный идентификатор прокси.")
+		return
+	}
+	profile, err := h.mtProfiles.GetByID(r.Context(), id)
+	if err != nil || profile.UserID != user.ID {
+		h.renderError(w, r, http.StatusNotFound, "Прокси не найден", "Проверьте, что вы удаляете свой Telegram-прокси.")
+		return
+	}
+	if _, err := h.mtProfiles.Delete(r.Context(), id); err != nil {
+		log.Printf("Dashboard: mtproto delete profile=%d: %v", id, err)
+	}
+	h.mtManager.UnregisterProfile(r.Context(), id)
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
 type profileStatsJSON struct {
 	ID              int      `json:"id"`
+	Kind            string   `json:"kind"`
 	TrafficUp       int64    `json:"traffic_up"`
 	TrafficDown     int64    `json:"traffic_down"`
 	TrafficTotal    int64    `json:"traffic_total"`
@@ -617,6 +913,7 @@ type profileStatsJSON struct {
 	IsActive        bool     `json:"is_active"`
 	IsExpired       bool     `json:"is_expired"`
 	IsOverLimit     bool     `json:"is_over_limit"`
+	CurrentConns    int64    `json:"current_conns"`
 }
 
 type dashStatsJSON struct {
@@ -657,6 +954,12 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	profiles, onlineUsers, onlineIPs := h.enrichProfiles(r.Context(), profiles)
+	mtProfiles, err := h.mtProfiles.GetByUserID(r.Context(), user.ID)
+	if err != nil {
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	mtProfiles, mtOnline, mtConns := h.enrichMTProtoProfiles(mtProfiles)
 
 	// Свежий юзер для актуальных балансов и подписки
 	freshUser, _ := h.users.GetByID(r.Context(), user.ID)
@@ -678,6 +981,7 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 
 		s := profileStatsJSON{
 			ID:              p.ID,
+			Kind:            "vpn",
 			TrafficUp:       p.TrafficUp,
 			TrafficDown:     p.TrafficDown,
 			TrafficTotal:    totalP,
@@ -708,6 +1012,37 @@ func (h *DashboardHandler) StatsJSON(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		profileStats = append(profileStats, s)
+	}
+
+	for _, p := range mtProfiles {
+		totalP := p.TrafficUp + p.TrafficDown
+		isExpired := p.ExpiresAt != nil && p.ExpiresAt.Before(time.Now())
+		isOverLimit := p.TrafficLimit > 0 && totalP >= p.TrafficLimit
+		s := profileStatsJSON{
+			ID:              p.ID,
+			Kind:            "mtproto",
+			TrafficUp:       p.TrafficUp,
+			TrafficDown:     p.TrafficDown,
+			TrafficTotal:    totalP,
+			TrafficUpFmt:    formatBytesGo(p.TrafficUp),
+			TrafficDownFmt:  formatBytesGo(p.TrafficDown),
+			TrafficTotalFmt: formatBytesGo(totalP),
+			IsOnline:        p.IsActive && mtOnline[p.ID],
+			IsActive:        p.IsActive,
+			IsExpired:       isExpired,
+			IsOverLimit:     isOverLimit,
+			CurrentConns:    mtConns[p.ID],
+		}
+		if p.TrafficLimit > 0 {
+			pct := int(float64(totalP) / float64(p.TrafficLimit) * 100)
+			if pct > 100 {
+				pct = 100
+			}
+			s.UsagePercent = pct
+			s.LimitFmt = formatBytesGo(p.TrafficLimit)
+			s.ProgressColor = progressColor(pct)
+		}
 		profileStats = append(profileStats, s)
 	}
 
@@ -834,6 +1169,37 @@ func (h *DashboardHandler) ProfileTrafficChart(w http.ResponseWriter, r *http.Re
 		points = []models.TrafficPoint{}
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"range":      r.URL.Query().Get("range"),
+		"bucket":     bucket,
+		"profile_id": profileID,
+		"points":     points,
+	})
+}
+
+func (h *DashboardHandler) MTProtoTrafficChart(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+
+	profileID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	from, bucket, ok := resolveTrafficRange(r.URL.Query().Get("range"))
+	if !ok {
+		http.Error(w, "invalid range", http.StatusBadRequest)
+		return
+	}
+	points, err := h.mtTraffic.AggregateByProfile(r.Context(), profileID, user.ID, from, bucket)
+	if err != nil {
+		log.Printf("MTProtoTrafficChart: aggregate profile=%d user=%d: %v", profileID, user.ID, err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	if points == nil {
+		points = []models.TrafficPoint{}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"range":      r.URL.Query().Get("range"),

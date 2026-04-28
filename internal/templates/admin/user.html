@@ -84,7 +84,7 @@
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.8rem;">
         <div style="background: #0f172a; padding: 0.8rem 1rem; border-radius: 6px;">
             <div style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.2rem;">Профили</div>
-            <div style="font-size: 1.2rem;"><strong>{{.ActiveCount}}</strong> <span style="color: #94a3b8; font-size: 0.9rem;">/ {{len .Profiles}}</span></div>
+            <div style="font-size: 1.2rem;"><strong>{{.ActiveCount}}</strong> <span style="color: #94a3b8; font-size: 0.9rem;">/ {{.ProfileCount}}</span></div>
         </div>
         <div style="background: #0f172a; padding: 0.8rem 1rem; border-radius: 6px;"
              title="Сумма счётчиков по активным VPN-профилям. Обнуляется кнопкой «Сброс» у профиля и исчезает при удалении профиля — для контроля реальных списаний с баланса смотрите блок «Баланс трафика».">
@@ -241,7 +241,7 @@
             <th style="text-align: right;">Действия</th>
         </tr>
         {{range .Profiles}}
-        <tr data-profile-id="{{.ID}}">
+        <tr data-profile-kind="vpn" data-profile-id="{{.ID}}">
             <td>
                 <strong>{{.Name}}</strong>
                 <div style="font-size: 0.7rem; color: #64748b; font-family: monospace; margin-top: 0.2rem;">{{.UUID}}</div>
@@ -309,6 +309,93 @@
     </table>
     {{else}}
     <p style="color: #64748b; margin: 0;">У пользователя нет VPN-профилей.</p>
+    {{end}}
+</div>
+
+<!-- ==========================================
+     Telegram-прокси
+     ========================================== -->
+<div class="card">
+    <h3 style="margin-top: 0; margin-bottom: 1rem;">Telegram-прокси</h3>
+
+    {{if .MTProtoProfiles}}
+    <table>
+        <tr>
+            <th>Прокси</th>
+            <th>Статус</th>
+            <th>Трафик</th>
+            <th>Лимит</th>
+            <th style="text-align: right;">Действия</th>
+        </tr>
+        {{range .MTProtoProfiles}}
+        <tr data-profile-kind="mtproto" data-profile-id="{{.ID}}">
+            <td>
+                <strong>{{.Name}}</strong>
+                <div style="font-size: 0.7rem; color: #64748b; font-family: monospace; margin-top: 0.2rem;">{{.ProxyURI}}</div>
+            </td>
+            <td>
+                {{if .IsActive}}
+                    {{if .IsOnline}}
+                        <span class="badge badge-green" data-stat="profile-status">● online</span>
+                        <span data-stat="profile-ips"><span class="badge badge-blue">{{.CurrentConns}} conn</span></span>
+                    {{else}}
+                        <span class="badge badge-blue" data-stat="profile-status">active</span>
+                        <span data-stat="profile-ips"></span>
+                    {{end}}
+                {{else}}
+                    <span class="badge badge-red" data-stat="profile-status">disabled</span>
+                    <span data-stat="profile-ips"></span>
+                {{end}}
+            </td>
+            <td>
+                <div style="display: flex; flex-direction: column; gap: 0.3rem; min-width: 140px;">
+                    <span class="stat" data-stat="profile-traffic">↑{{formatBytes .TrafficUp}} ↓{{formatBytes .TrafficDown}}</span>
+                    <div data-stat="profile-usage-text" style="font-size: 0.75rem; color: #94a3b8; {{if le .TrafficLimit 0}}display: none;{{end}}">
+                        Σ <span data-stat="profile-total">{{formatBytes .TrafficTotal}}</span> / <span data-stat="profile-limit">{{formatBytes .TrafficLimit}}</span> · <span data-stat="profile-pct">{{.UsagePercent}}</span>%
+                    </div>
+                    <div data-stat="profile-bar-wrap" style="background: #334155; border-radius: 4px; height: 5px; overflow: hidden; {{if le .TrafficLimit 0}}display: none;{{end}}">
+                        <div data-stat="profile-bar" style="background: {{.ProgressColor}}; width: {{.UsagePercent}}%; height: 100%; transition: width 0.5s ease, background 0.5s ease;"></div>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <form method="POST" action="/admin/mtproto/{{.ID}}/limit" style="display: flex; gap: 0.3rem; align-items: center;">
+                {{template "csrf" $}}
+                    <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                    <input type="number" name="limit_gb" step="0.5" min="0" value="{{divGB .TrafficLimit}}"
+                        style="width: 80px; padding: 0.3rem 0.5rem; margin: 0;">
+                    <span style="color: #94a3b8; font-size: 0.8rem;">GB</span>
+                    <button type="submit" class="btn btn-sm btn-primary">OK</button>
+                </form>
+            </td>
+            <td style="text-align: right;">
+                <div style="display: inline-flex; gap: 0.3rem;">
+                    <form method="POST" action="/admin/mtproto/{{.ID}}/toggle"
+                          data-stat="profile-toggle-deactivate" style="{{if not .IsActive}}display: none;{{end}}">
+                {{template "csrf" $}}
+                        <input type="hidden" name="action" value="deactivate">
+                        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                        <button type="submit" class="btn btn-sm btn-danger">Откл</button>
+                    </form>
+                    <form method="POST" action="/admin/mtproto/{{.ID}}/toggle"
+                          data-stat="profile-toggle-activate" style="{{if .IsActive}}display: none;{{end}}">
+                {{template "csrf" $}}
+                        <input type="hidden" name="action" value="activate">
+                        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                        <button type="submit" class="btn btn-sm btn-primary">Вкл</button>
+                    </form>
+                    <form method="POST" action="/admin/mtproto/{{.ID}}/reset" data-confirm="Сбросить трафик Telegram-прокси?">
+                {{template "csrf" $}}
+                        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+                        <button type="submit" class="btn btn-sm" style="background: #475569; color: white;">Сброс</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {{end}}
+    </table>
+    {{else}}
+    <p style="color: #64748b; margin: 0;">У пользователя нет Telegram-прокси.</p>
     {{end}}
 </div>
 

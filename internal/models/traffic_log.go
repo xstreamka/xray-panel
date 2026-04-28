@@ -132,9 +132,17 @@ func (s *TrafficLogStore) AggregateByUser(
 
 	q := fmt.Sprintf(`
 		SELECT %s AS t, SUM(bytes_up)::bigint AS up, SUM(bytes_down)::bigint AS down
-		FROM traffic_logs
-		WHERE profile_id IN (SELECT id FROM vpn_profiles WHERE user_id = $1)
-		  AND logged_at >= $2
+		FROM (
+			SELECT logged_at, bytes_up, bytes_down
+			FROM traffic_logs
+			WHERE profile_id IN (SELECT id FROM vpn_profiles WHERE user_id = $1)
+			  AND logged_at >= $2
+			UNION ALL
+			SELECT logged_at, bytes_up, bytes_down
+			FROM mtproto_traffic_logs
+			WHERE profile_id IN (SELECT id FROM mtproto_profiles WHERE user_id = $1)
+			  AND logged_at >= $2
+		) all_logs
 		GROUP BY 1
 		ORDER BY 1 ASC`, truncExpr)
 

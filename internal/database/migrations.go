@@ -52,6 +52,34 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_vpn_profiles_user_id ON vpn_profiles(user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_vpn_profiles_uuid ON vpn_profiles(uuid)`,
 
+	`CREATE TABLE IF NOT EXISTS mtproto_profiles (
+		id           SERIAL PRIMARY KEY,
+		user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+		secret_hex   VARCHAR(32) UNIQUE NOT NULL,
+		name         VARCHAR(100) NOT NULL DEFAULT 'telegram',
+		is_active    BOOLEAN DEFAULT TRUE,
+		traffic_up   BIGINT DEFAULT 0,
+		traffic_down BIGINT DEFAULT 0,
+		traffic_limit BIGINT DEFAULT 0,
+		expires_at   TIMESTAMPTZ,
+		limit_notified_at TIMESTAMPTZ,
+		created_at   TIMESTAMPTZ DEFAULT NOW(),
+		updated_at   TIMESTAMPTZ DEFAULT NOW(),
+		UNIQUE(user_id, name)
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS mtproto_traffic_logs (
+		profile_id INTEGER NOT NULL REFERENCES mtproto_profiles(id) ON DELETE CASCADE,
+		logged_at  TIMESTAMPTZ NOT NULL,
+		bytes_up   BIGINT NOT NULL DEFAULT 0,
+		bytes_down BIGINT NOT NULL DEFAULT 0,
+		PRIMARY KEY (profile_id, logged_at)
+	)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_mtproto_traffic_logs_logged_at ON mtproto_traffic_logs(logged_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_mtproto_profiles_user_id ON mtproto_profiles(user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_mtproto_profiles_secret_hex ON mtproto_profiles(secret_hex)`,
+
 	// --- Миграции для существующих БД (ALTER TABLE) ---
 	// email_verified + verify_token + verify_expires
 	`DO $$ BEGIN
@@ -184,6 +212,7 @@ END $$`,
 	// активации (SetActive TRUE / ReactivateAllByUser), чтобы следующий цикл
 	// снова мог отправить уведомление.
 	`ALTER TABLE vpn_profiles ADD COLUMN IF NOT EXISTS limit_notified_at TIMESTAMPTZ`,
+	`ALTER TABLE mtproto_profiles ADD COLUMN IF NOT EXISTS limit_notified_at TIMESTAMPTZ`,
 
 	// Снос legacy-колонки: данные уже перенесены в extra_traffic_balance
 	// более ранней миграцией (на существующих БД). На чистых БД — no-op.

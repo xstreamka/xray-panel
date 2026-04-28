@@ -16,6 +16,7 @@ import (
 	"xray-panel/internal/email"
 	"xray-panel/internal/middleware"
 	"xray-panel/internal/models"
+	"xray-panel/internal/mtproto"
 	"xray-panel/internal/paysign"
 	"xray-panel/internal/xray"
 )
@@ -27,6 +28,7 @@ type PayHandler struct {
 	users         *models.UserStore
 	mailer        *email.Sender
 	xrayHolder    *xray.Holder
+	mtManager     *mtproto.Manager
 	payServiceURL string
 	panelBaseURL  string
 	webhookSecret string
@@ -51,6 +53,7 @@ func NewPayHandler(
 	users *models.UserStore,
 	mailer *email.Sender,
 	xrayHolder *xray.Holder,
+	mtManager *mtproto.Manager,
 	payServiceURL, panelBaseURL, webhookSecret string,
 ) *PayHandler {
 	return &PayHandler{
@@ -60,6 +63,7 @@ func NewPayHandler(
 		users:         users,
 		mailer:        mailer,
 		xrayHolder:    xrayHolder,
+		mtManager:     mtManager,
 		payServiceURL: strings.TrimRight(payServiceURL, "/"),
 		panelBaseURL:  strings.TrimRight(panelBaseURL, "/"),
 		webhookSecret: webhookSecret,
@@ -329,6 +333,9 @@ func (h *PayHandler) Webhook(w http.ResponseWriter, r *http.Request) {
 
 	if collector := h.xrayHolder.GetCollector(); collector != nil {
 		collector.ReactivateUserAll(r.Context(), userID)
+	}
+	if h.mtManager != nil {
+		h.mtManager.ReactivateUserAll(r.Context(), userID)
 	}
 
 	if h.mailer != nil {

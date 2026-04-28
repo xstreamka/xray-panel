@@ -72,8 +72,9 @@ function refreshStats() {
                     }
                 }
 
-                (u.profiles || []).forEach(p => {
-                    const row = card.querySelector(`[data-profile-id="${p.id}"]`);
+                function updateProfileRow(p) {
+                    const kind = p.kind || 'vpn';
+                    const row = card.querySelector(`[data-profile-kind="${kind}"][data-profile-id="${p.id}"]`);
                     if (!row) return;
 
                     const status = row.querySelector('[data-stat="profile-status"]');
@@ -99,6 +100,8 @@ function refreshStats() {
                         const ips = p.online_ips || [];
                         if (p.is_active && p.is_online && ips.length > 0) {
                             ipsEl.innerHTML = ips.map(ip => '<span class="badge badge-blue">' + ip + '</span> ').join('');
+                        } else if (kind === 'mtproto' && p.is_active && p.is_online) {
+                            ipsEl.innerHTML = '<span class="badge badge-blue">' + (p.current_conns || 0) + ' conn</span>';
                         } else {
                             ipsEl.innerHTML = '';
                         }
@@ -131,7 +134,9 @@ function refreshStats() {
                             if (p.progress_color) bar.style.background = p.progress_color;
                         }
                     }
-                });
+                }
+                (u.profiles || []).forEach(updateProfileRow);
+                (u.mtproto_profiles || []).forEach(updateProfileRow);
             });
         })
         .catch(() => {});

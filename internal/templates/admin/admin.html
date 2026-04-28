@@ -68,7 +68,7 @@
                     <span class="badge badge-gray" data-stat="user-online">offline</span>
                 {{end}}
             </td>
-            <td title="активных / всего">{{.ActiveCount}} / {{len .Profiles}}</td>
+            <td title="активных / всего">{{.ActiveCount}} / {{.ProfileCount}}</td>
             <td data-stat="user-total">Σ {{formatBytes .TotalTraffic}}</td>
             <td data-stat="user-balance">{{formatBytes .TotalAvailable}}</td>
             <td>

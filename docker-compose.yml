@@ -29,6 +29,19 @@ services:
       - xray-logs:/var/log/xray
     command: ["run", "-c", "/etc/xray/config.json"]
 
+  mtproto:
+    build: ./docker/mtprotoproxy
+    container_name: ${MTPROTO_CONTAINER:-xray-panel-mtproto}
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MTPROTO_CONFIG_PATH: /config/config.py
+    depends_on:
+      panel:
+        condition: service_started
+    volumes:
+      - mtproto-config:/config
+
   panel:
     build: .
     restart: unless-stopped
@@ -50,6 +63,21 @@ services:
       XRAY_API_ADDR: "127.0.0.1:${XRAY_API_PORT:-10085}"
       XRAY_INBOUND_TAG: ${XRAY_INBOUND_TAG:-vless-in}
       XRAY_CONFIG_PATH: /etc/xray/config.json
+      MTPROTO_ENABLED: ${MTPROTO_ENABLED:-true}
+      MTPROTO_SERVER_PORT: ${MTPROTO_SERVER_PORT:-8443}
+      MTPROTO_LISTEN_ADDR: ${MTPROTO_LISTEN_ADDR:-0.0.0.0}
+      MTPROTO_LISTEN_ADDR_V6: ${MTPROTO_LISTEN_ADDR_V6:-::}
+      MTPROTO_CONFIG_PATH: /etc/mtprotoproxy/config.py
+      MTPROTO_METRICS_ADDR: ${MTPROTO_METRICS_ADDR:-127.0.0.1:9091}
+      MTPROTO_METRICS_PORT: ${MTPROTO_METRICS_PORT:-9091}
+      MTPROTO_CONTAINER: ${MTPROTO_CONTAINER:-xray-panel-mtproto}
+      MTPROTO_DOCKER_SOCKET: /var/run/docker.sock
+      MTPROTO_TLS_DOMAIN: ${MTPROTO_TLS_DOMAIN:-vk.com}
+      MTPROTO_MASK_HOST: ${MTPROTO_MASK_HOST:-vk.com}
+      MTPROTO_SOCKS5_HOST: ${MTPROTO_SOCKS5_HOST:-}
+      MTPROTO_SOCKS5_PORT: ${MTPROTO_SOCKS5_PORT:-0}
+      MTPROTO_SOCKS5_USER: ${MTPROTO_SOCKS5_USER:-}
+      MTPROTO_SOCKS5_PASS: ${MTPROTO_SOCKS5_PASS:-}
       SERVER_ADDR: ${SERVER_ADDR}
       SERVER_PORT: ${SERVER_PORT:-443}
       REALITY_DEST: ${REALITY_DEST:-}
@@ -73,9 +101,12 @@ services:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
     volumes:
       - xray-config:/etc/xray
+      - mtproto-config:/etc/mtprotoproxy
       - xray-logs:/var/log/xray
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   pgdata:
   xray-config:
+  mtproto-config:
   xray-logs:

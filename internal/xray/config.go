@@ -107,6 +107,19 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"address": "127.0.0.1",
 				},
 			},
+			// Локальный SOCKS5 для MTProto: контейнер mtprotoproxy ходит сюда,
+			// чтобы достучаться до Telegram DC через Амстердам (когда РФ-провайдер
+			// режет прямой outbound). Только loopback — наружу не светится.
+			{
+				"tag":      "socks-mtproto",
+				"listen":   "127.0.0.1",
+				"port":     1080,
+				"protocol": "socks",
+				"settings": map[string]any{
+					"auth": "noauth",
+					"udp":  false,
+				},
+			},
 			{
 				"tag":      cfg.XrayInboundTag, // "vless-in"
 				"listen":   "0.0.0.0",
@@ -193,6 +206,12 @@ func GenerateConfig(cfg *config.Config, activeUUIDs []string, outputPath string)
 					"type":        "field",
 					"inboundTag":  []string{"api-in"},
 					"outboundTag": "api",
+				},
+				// 2.5. MTProto-SOCKS — всё гоним в Амстердам, минуя гео-правила.
+				{
+					"type":        "field",
+					"inboundTag":  []string{"socks-mtproto"},
+					"outboundTag": "proxy",
 				},
 				// 3. РФ домены → direct
 				{

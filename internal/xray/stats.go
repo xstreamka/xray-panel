@@ -63,6 +63,8 @@ type StatsCollector struct {
 	lastOnlineIPs map[string][]string
 
 	lastFullEnforce time.Time
+
+	userDisconnectHook func(ctx context.Context, userID int, reason string)
 }
 
 // trafficLogRetention — сколько храним 5-минутные бакеты. Дневной retention-job
@@ -95,6 +97,10 @@ func NewStatsCollector(
 		trafficBuffer: make(map[int][2]int64),
 		disabledUsers: make(map[int]bool),
 	}
+}
+
+func (s *StatsCollector) SetUserDisconnectHook(fn func(ctx context.Context, userID int, reason string)) {
+	s.userDisconnectHook = fn
 }
 
 // notifyBlock асинхронно шлёт юзеру письмо о блокировке. reason:
@@ -563,6 +569,17 @@ func (s *StatsCollector) ReactivateUserAll(ctx context.Context, userID int) {
 // Используется, когда баланс подписки исчерпан или истёк срок подписки.
 // Экспортирован, чтобы подписочный воркер мог вызывать на истёкших юзерах.
 func (s *StatsCollector) DisconnectUserAll(ctx context.Context, userID int, reason string) {
+	s.disconnectUserAll(ctx, userID, reason, true)
+}
+
+// DisconnectUserAllLocal отключает только Xray-часть без внешнего hook'а.
+// Нужен, когда отключение инициировал другой backend (например MTProto),
+// чтобы не уйти в рекурсивное "отключи меня обратно".
+func (s *StatsCollector) DisconnectUserAllLocal(ctx context.Context, userID int, reason string) {
+	s.disconnectUserAll(ctx, userID, reason, false)
+}
+
+func (s *StatsCollector) disconnectUserAll(ctx context.Context, userID int, reason string, notifyHook bool) {
 	profiles, err := s.profiles.GetByUserID(ctx, userID)
 	if err != nil {
 		log.Printf("Enforce: GetByUserID %d: %v", userID, err)
@@ -593,6 +610,10 @@ func (s *StatsCollector) DisconnectUserAll(ctx context.Context, userID int, reas
 
 	log.Printf("Enforce: user=%d disabled (%s) — %d profiles, %d IPs blocked",
 		userID, reason, len(uuids), blocked)
+
+	if notifyHook && s.userDisconnectHook != nil {
+		s.userDisconnectHook(ctx, userID, reason)
+	}
 }
 
 // disconnectUser отключает ОДИН профиль по personal-лимиту (пользовательская фича).

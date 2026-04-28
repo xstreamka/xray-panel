@@ -8,6 +8,7 @@ import (
 
 	"xray-panel/internal/email"
 	"xray-panel/internal/models"
+	"xray-panel/internal/mtproto"
 	"xray-panel/internal/xray"
 )
 
@@ -20,6 +21,7 @@ type Worker struct {
 	profiles *models.VPNProfileStore
 	mailer   *email.Sender // nil если SMTP не настроен — reminder-цикл станет no-op
 	holder   *xray.Holder
+	mt       *mtproto.Manager
 	baseURL  string
 
 	expireEvery   time.Duration
@@ -31,6 +33,7 @@ func NewWorker(
 	profiles *models.VPNProfileStore,
 	mailer *email.Sender,
 	holder *xray.Holder,
+	mt *mtproto.Manager,
 	baseURL string,
 ) *Worker {
 	return &Worker{
@@ -38,6 +41,7 @@ func NewWorker(
 		profiles:      profiles,
 		mailer:        mailer,
 		holder:        holder,
+		mt:            mt,
 		baseURL:       baseURL,
 		expireEvery:   1 * time.Minute,
 		reminderEvery: 1 * time.Hour,
@@ -89,6 +93,9 @@ func (w *Worker) runExpire(ctx context.Context) {
 			// При ближайшем подъёме Xray syncUsersToXray не добавит их обратно.
 			if _, err := w.profiles.DeactivateAllByUser(ctx, uid); err != nil {
 				log.Printf("Subscription: DeactivateAllByUser %d: %v", uid, err)
+			}
+			if w.mt != nil {
+				w.mt.DisconnectUserAllLocal(ctx, uid, "subscription expired")
 			}
 		}
 		w.notifyBlock(ctx, uid)
