@@ -214,12 +214,10 @@
 {{end}}
 
 {{if .MTProtoEnabled}}
-{{if or .User.IsAdmin .MTProtoProfiles}}
 <!-- ==== Telegram прокси ==== -->
 <h2 style="margin: 2rem 0 1rem;">Telegram прокси</h2>
 
-{{if .User.IsAdmin}}
-<!-- Создание Telegram-прокси (только админ) -->
+<!-- Создание Telegram-прокси -->
 <div class="card">
     <form method="POST" action="/dashboard/mtproto" style="display: flex; gap: 0.8rem; align-items: end; flex-wrap: wrap;">
                 {{template "csrf" $}}
@@ -238,7 +236,6 @@
         MTProto-прокси для Telegram. Трафик списывается из того же общего баланса, что и VPN.
     </p>
 </div>
-{{end}}
 
 {{if .MTProtoProfiles}}
 {{range .MTProtoProfiles}}
@@ -332,7 +329,6 @@
 <div class="card" style="text-align: center; color: #94a3b8;">
     Telegram-прокси пока не созданы.
 </div>
-{{end}}
 {{end}}
 {{end}}
 

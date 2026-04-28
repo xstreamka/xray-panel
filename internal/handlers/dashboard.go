@@ -698,10 +698,6 @@ func (h *DashboardHandler) CreateMTProtoProfile(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	if !user.IsAdmin {
-		h.renderError(w, r, http.StatusForbidden, "Недоступно", "Создание Telegram-прокси доступно только администраторам.")
-		return
-	}
 	name := strings.TrimSpace(r.FormValue("name"))
 	if name == "" {
 		name = "telegram"
