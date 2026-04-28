@@ -1,7 +1,7 @@
 {{define "nav"}}
 {{if .}}{{with .User}}
 <nav>
-    <span class="brand">XS VPN</span>
+    <img src="/static/img/logo.png" alt="XS VPN" style="height: 70px;" />
     <div class="nav-links">
         {{if .EmailVerified}}
         <a href="/"          {{if eq $.Active "welcome"}}class="active"{{end}}>Главная</a>
