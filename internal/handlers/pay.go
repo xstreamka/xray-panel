@@ -157,10 +157,12 @@ func (h *PayHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 		"kind":          string(tariff.Kind),
 	})
 
+	finalAmount := tariff.FinalAmountRub()
+
 	params := map[string]string{
 		"product_type": "vpn",
 		"plan_id":      tariff.Code,
-		"amount":       fmt.Sprintf("%.2f", tariff.AmountRub),
+		"amount":       fmt.Sprintf("%.2f", finalAmount),
 		"description":  tariff.Description,
 		"user_ref":     strconv.Itoa(user.ID),
 		"email":        user.Email,
@@ -179,8 +181,8 @@ func (h *PayHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 	q.Set("sig", sig)
 
 	checkoutURL := h.payServiceURL + "/pay/checkout?" + q.Encode()
-	log.Printf("Pay: user %d (%s) → checkout %s [%s] (%.2f ₽)",
-		user.ID, user.Email, tariff.Code, tariff.Kind, tariff.AmountRub)
+	log.Printf("Pay: user %d (%s) → checkout %s [%s] (%.2f ₽, base %.2f, скидка %d%%)",
+		user.ID, user.Email, tariff.Code, tariff.Kind, finalAmount, tariff.AmountRub, tariff.DiscountPercent)
 
 	http.Redirect(w, r, checkoutURL, http.StatusSeeOther)
 }

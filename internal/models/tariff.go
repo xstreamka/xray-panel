@@ -34,6 +34,21 @@ type Tariff struct {
 	Kind            TariffKind `json:"kind"`
 }
 
+// HasDiscount — есть ли действующая скидка у тарифа.
+func (t Tariff) HasDiscount() bool {
+	return t.DiscountPercent > 0 && t.DiscountPercent < 100
+}
+
+// FinalAmountRub — итоговая цена с учётом скидки. Используется и в шаблонах,
+// и при формировании платежа, чтобы перечёркнутая цена в UI совпадала с реально
+// списываемой суммой.
+func (t Tariff) FinalAmountRub() float64 {
+	if !t.HasDiscount() {
+		return t.AmountRub
+	}
+	return t.AmountRub * float64(100-t.DiscountPercent) / 100.0
+}
+
 type TariffStore struct {
 	pool *pgxpool.Pool
 }

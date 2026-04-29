@@ -80,18 +80,33 @@
         <div class="card" style="position: relative; text-align: center; margin: 0; {{if or .IsPopular (gt .DiscountPercent 0)}}border: 1px solid {{if gt .DiscountPercent 0}}#f59e0b{{else}}#3b82f6{{end}};{{end}}">
             {{if or .IsPopular (gt .DiscountPercent 0)}}
             <div class="tariff-badges">
-                {{if gt .DiscountPercent 0}}<span class="tariff-badge discount">💲 Скидка {{.DiscountPercent}}%</span>{{end}}
+                {{if gt .DiscountPercent 0}}<span class="tariff-badge discount">💲 Скидка</span>{{end}}
                 {{if .IsPopular}}<span class="tariff-badge popular">⭐ Популярный</span>{{end}}
             </div>
             {{end}}
-            <div style="font-size: 2rem; font-weight: bold; color: #38bdf8; margin-bottom: 0.3rem;">
+            <div style="font-size: 2rem; font-weight: bold; color: #fff; margin-bottom: 0.3rem;">
                 {{.Label}}
             </div>
-            <div style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 1rem;">
+            <div style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.6rem;">
                 на {{.DurationDays}} дн.
             </div>
-            <div style="font-size: 1.8rem; font-weight: bold; margin-bottom: 1rem;">
-                {{printf "%.0f" .AmountRub}} <span style="color: #94a3b8; font-size: 1rem;">₽</span>
+            <div style="color: #f1f5f9; font-size: 0.95rem; margin-bottom: 1rem;">
+                📦 {{printf "%.0f" .TrafficGB}} ГБ трафика
+            </div>
+            <div class="tariff-price-block" style="margin-bottom: 1rem;">
+                {{if .HasDiscount}}
+                <div class="price-row">
+                    <span class="price-old">{{printf "%.0f" .AmountRub}} ₽</span>
+                    <span class="price-save">−{{.DiscountPercent}}%</span>
+                </div>
+                <div class="price-new" style="font-size: 1.8rem;">
+                    {{printf "%.0f" .FinalAmountRub}} <span class="price-cur">₽</span>
+                </div>
+                {{else}}
+                <div class="price-new" style="font-size: 1.8rem; color: #38bdf8;">
+                    {{printf "%.0f" .AmountRub}} <span class="price-cur">₽</span>
+                </div>
+                {{end}}
             </div>
             <button type="submit" class="btn btn-primary" style="width: 100%;">Оплатить</button>
         </div>
@@ -123,11 +138,26 @@
             <div style="font-size: 1.6rem; font-weight: bold; color: #fcd34d; margin-bottom: 0.3rem;">
                 {{.Label}}
             </div>
-            <div style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 1rem;">
+            <div style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.6rem;">
                 к активной подписке
             </div>
-            <div style="font-size: 1.5rem; font-weight: bold; margin-bottom: 1rem;">
-                {{printf "%.0f" .AmountRub}} <span style="color: #94a3b8; font-size: 1rem;">₽</span>
+            <div style="color: #f1f5f9; font-size: 0.95rem; margin-bottom: 1rem;">
+                📦 +{{printf "%.0f" .TrafficGB}} ГБ
+            </div>
+            <div class="tariff-price-block" style="margin-bottom: 1rem;">
+                {{if .HasDiscount}}
+                <div class="price-row">
+                    <span class="price-old">{{printf "%.0f" .AmountRub}} ₽</span>
+                    <span class="price-save">−{{.DiscountPercent}}%</span>
+                </div>
+                <div class="price-new" style="font-size: 1.5rem;">
+                    {{printf "%.0f" .FinalAmountRub}} <span class="price-cur">₽</span>
+                </div>
+                {{else}}
+                <div class="price-new" style="font-size: 1.5rem; color: #38bdf8;">
+                    {{printf "%.0f" .AmountRub}} <span class="price-cur">₽</span>
+                </div>
+                {{end}}
             </div>
             <button type="submit" class="btn btn-primary" style="width: 100%;" {{if not $.HasActiveSub}}disabled{{end}}>Купить</button>
         </div>

@@ -157,21 +157,28 @@
     <div class="tariff{{if .IsPopular}} popular{{end}}{{if gt .DiscountPercent 0}} discount{{end}}">
         {{if or .IsPopular (gt .DiscountPercent 0)}}
         <div class="tariff-badges">
-            {{if gt .DiscountPercent 0}}<span class="tariff-badge discount">💲 Скидка {{.DiscountPercent}}%</span>{{end}}
+            {{if gt .DiscountPercent 0}}<span class="tariff-badge discount">💲 Скидка</span>{{end}}
             {{if .IsPopular}}<span class="tariff-badge popular">⭐ Популярный</span>{{end}}
         </div>
         {{end}}
         <h3>{{.Label}}</h3>
         <div class="price">
+            {{if .HasDiscount}}
+            <div class="price-row">
+                <span class="price-old">{{printf "%.0f" .AmountRub}} ₽</span>
+                <span class="price-save">−{{.DiscountPercent}}%</span>
+            </div>
+            <div class="price-new">
+                {{printf "%.0f" .FinalAmountRub}} ₽
+                <small>/ {{.DurationDays}} дн.</small>
+            </div>
+            {{else}}
             {{printf "%.0f" .AmountRub}} ₽
             <small>/ {{.DurationDays}} дн.</small>
+            {{end}}
         </div>
         <div class="traffic">📦 {{printf "%.0f" .TrafficGB}} ГБ трафика</div>
-        {{if .Description}}
-        <div class="desc">{{.Description}}</div>
-        {{else}}
         <div class="desc">Полный доступ, неограниченное число профилей.</div>
-        {{end}}
         <a href="/pay" class="btn btn-primary" style="text-align:center;">Оформить</a>
     </div>
     {{end}}
@@ -196,14 +203,20 @@
         {{end}}
         <h3>{{.Label}}</h3>
         <div class="price">
+            {{if .HasDiscount}}
+            <div class="price-row">
+                <span class="price-old">{{printf "%.0f" .AmountRub}} ₽</span>
+                <span class="price-save">−{{.DiscountPercent}}%</span>
+            </div>
+            <div class="price-new">
+                {{printf "%.0f" .FinalAmountRub}} ₽
+            </div>
+            {{else}}
             {{printf "%.0f" .AmountRub}} ₽
+            {{end}}
         </div>
         <div class="traffic">📦 +{{printf "%.0f" .TrafficGB}} ГБ</div>
-        {{if .Description}}
-        <div class="desc">{{.Description}}</div>
-        {{else}}
         <div class="desc">Добавляется к текущей подписке сразу после оплаты.</div>
-        {{end}}
         <a href="/pay" class="btn btn-primary" style="text-align:center;">Докупить</a>
     </div>
     {{end}}
