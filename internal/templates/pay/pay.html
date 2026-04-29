@@ -131,7 +131,7 @@
         <div class="card" style="position: relative; text-align: center; margin: 0; opacity: {{if $.HasActiveSub}}1{{else}}0.55{{end}}; {{if or .IsPopular (gt .DiscountPercent 0)}}border: 1px solid {{if gt .DiscountPercent 0}}#f59e0b{{else}}#3b82f6{{end}};{{end}}">
             {{if or .IsPopular (gt .DiscountPercent 0)}}
             <div class="tariff-badges">
-                {{if gt .DiscountPercent 0}}<span class="tariff-badge discount">💲 Скидка {{.DiscountPercent}}%</span>{{end}}
+                {{if gt .DiscountPercent 0}}<span class="tariff-badge discount">💲 Скидка</span>{{end}}
                 {{if .IsPopular}}<span class="tariff-badge popular">⭐ Популярный</span>{{end}}
             </div>
             {{end}}
